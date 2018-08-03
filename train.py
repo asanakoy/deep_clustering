@@ -24,12 +24,16 @@ from tqdm import tqdm
 import models
 from data_utils.index_imagenet import index_imagenet
 from data_utils.index_imagenet import IndexedDataset
+from data_utils.transforms import Sobel
+from data_utils.transforms import IMAGENET_NORMALIZE
 
 from utils import save_checkpoint, AverageMeter, accuracy
 
 if not sys.warnoptions:
     # suppress pesky PIL EXIF warnings
     warnings.simplefilter("once")
+    warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+    warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 # torchvision.set_image_backend('accimage')  # should be faster than PIL
 
@@ -272,7 +276,11 @@ def main():
 
     if checkpoint is not None:
         start_epoch = checkpoint['epoch']
-        best_score = checkpoint['best_score']
+        if 'best_score' in checkpoint:
+            best_score = checkpoint['best_score']
+        else:
+            print 'WARNING! NO best "score_found" in checkpoint!'
+            best_score = 0
         print 'Best score:', best_score
         print 'Current score:', checkpoint['cur_score']
         model.load_state_dict(checkpoint['state_dict'])
@@ -305,34 +313,39 @@ def main():
     assert dataset_indices['train']['class_to_idx'] == \
            dataset_indices['val']['class_to_idx']
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
     print 'Creating train dataset...'
-    train_dataset = IndexedDataset(
-        split_dirs['train'], dataset_indices['train'],
-        transform=transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]))
+    train_transforms = [
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip()
+    ]
+    if args.sobel:
+        train_transforms.extend([Sobel(), transforms.ToTensor()])
+    else:
+        train_transforms.extend([transforms.ToTensor(), IMAGENET_NORMALIZE])
+
+    train_dataset = IndexedDataset(split_dirs['train'], dataset_indices['train'],
+                                   transform=transforms.Compose(train_transforms))
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=args.batch_size, shuffle=True,
         num_workers=args.workers, pin_memory=True)
 
     print 'Creating val dataset...'
+    val_transforms = [
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+    ]
+    if args.sobel:
+        val_transforms.extend([Sobel(), transforms.ToTensor()])
+    else:
+        val_transforms.extend([transforms.ToTensor(), IMAGENET_NORMALIZE])
+    val_dataset = IndexedDataset(split_dirs['val'], dataset_indices['val'],
+                                 transform=transforms.Compose(val_transforms))
     val_loader = torch.utils.data.DataLoader(
-        IndexedDataset(
-            split_dirs['val'], dataset_indices['val'],
-            transform=transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])),
+        val_dataset,
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
+    ###############################################################################
 
     if args.evaluate:
         validate(val_loader, model, criterion, start_epoch)
@@ -369,16 +382,18 @@ def main():
             is_best = False
 
         if (epoch + 1) % save_epoch == 0:
-            filename = join(args.output_dir, 'checkpoint-{:05d}.pth.tar'.format(epoch + 1))
+            filepath = join(args.output_dir, 'checkpoint-{:05d}.pth.tar'.format(epoch + 1))
         else:
-            filename = join(args.output_dir, 'checkpoint.pth.tar')
+            filepath = join(args.output_dir, 'checkpoint.pth.tar')
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
-            'top1_avg_accuracy': top1_avg,
+            'cur_score': score,
+            'best_score': best_score,
+            'top1_avg_accuracy_train': top1_avg,
             'optimizer': optimizer.state_dict(),
-        }, is_best=is_best, filename=filename)
+        }, is_best=is_best, filepath=filepath)
 
 
 if __name__ == '__main__':
