@@ -17,29 +17,25 @@ from torch.optim.lr_scheduler import StepLR
 import torchvision
 import torch.utils.data
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 import models
 from data_utils.index_imagenet import index_imagenet
 from data_utils.index_imagenet import IndexedDataset
-from data_utils.transforms import Sobel
-from data_utils.transforms import IMAGENET_NORMALIZE
+from data_utils.transforms import IMAGENET_NORMALIZE, SIMPLE_NORMALIZE
 
 from utils import save_checkpoint, AverageMeter, accuracy
 
 if not sys.warnoptions:
     # suppress pesky PIL EXIF warnings
     warnings.simplefilter("once")
-    warnings.filterwarnings("ignore", message="numpy.dtype size changed")
-    warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
-
-# torchvision.set_image_backend('accimage')  # should be faster than PIL
+    warnings.filterwarnings("ignore", message="numpy.dtype size changed*")
+    warnings.filterwarnings("ignore", message="numpy.ufunc size changed*")
 
 
 model_names = sorted(name for name in models.__dict__
-                     if name.islower() and not name.startswith("__")
+                     if name[0].isupper() and not name.startswith("__")
                      and callable(models.__dict__[name]))
 MODELS_DIR = './results'
 
@@ -53,8 +49,6 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='AlexNet',
                     help='model architecture: ' +
                          ' | '.join(model_names) +
                          ' (default: AlexNet)')
-parser.add_argument('-sobel', '--sobel', action='store_true',
-                    help='apply sobel filter on images?')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=500, type=int, metavar='N',
@@ -230,13 +224,16 @@ def main():
     #     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
     cudnn.benchmark = True
 
+    is_sobel = args.arch.endswith('Sobel')
+    print 'is_sobel', is_sobel
+
     if args.pretrained:
         assert False, 'Not supported for now'
         print("=> using pre-trained model '{}'".format(args.arch))
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](input_channels=3 if not args.sobel else 1)
+        model = models.__dict__[args.arch]()
 
     model = torch.nn.DataParallel(model).cuda()
     criterion = nn.CrossEntropyLoss().cuda()
@@ -245,11 +242,11 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
-    experiment = "{}_lr{}{}_labels".format(args.arch, args.lr, '_sobel' if args.sobel else '')
+    experiment = "{}_lr{}_labels".format(args.arch, args.lr)
 
     checkpoint = None
     if args.output_dir is None:
-        args.output_dir = join(MODELS_DIR, experiment + args.exp_suffix)
+        args.output_dir = join(MODELS_DIR, experiment + '_' + args.exp_suffix)
 
     if args.output_dir is not None and os.path.exists(args.output_dir):
         ckpt_path = join(args.output_dir, 'checkpoint.pth.tar')
@@ -316,12 +313,11 @@ def main():
     print 'Creating train dataset...'
     train_transforms = [
         transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip()
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor()
     ]
-    if args.sobel:
-        train_transforms.extend([Sobel(), transforms.ToTensor()])
-    else:
-        train_transforms.extend([transforms.ToTensor(), IMAGENET_NORMALIZE])
+    if not is_sobel:
+        train_transforms.append(IMAGENET_NORMALIZE)
 
     train_dataset = IndexedDataset(split_dirs['train'], dataset_indices['train'],
                                    transform=transforms.Compose(train_transforms))
@@ -334,11 +330,11 @@ def main():
     val_transforms = [
         transforms.Resize(256),
         transforms.CenterCrop(224),
+        transforms.ToTensor()
     ]
-    if args.sobel:
-        val_transforms.extend([Sobel(), transforms.ToTensor()])
-    else:
-        val_transforms.extend([transforms.ToTensor(), IMAGENET_NORMALIZE])
+    if not is_sobel:
+        val_transforms.append(IMAGENET_NORMALIZE)
+
     val_dataset = IndexedDataset(split_dirs['val'], dataset_indices['val'],
                                  transform=transforms.Compose(val_transforms))
     val_loader = torch.utils.data.DataLoader(
