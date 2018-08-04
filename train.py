@@ -30,8 +30,9 @@ from utils import save_checkpoint, AverageMeter, accuracy
 if not sys.warnoptions:
     # suppress pesky PIL EXIF warnings
     warnings.simplefilter("once")
-    warnings.filterwarnings("ignore", message="numpy.dtype size changed*")
-    warnings.filterwarnings("ignore", message="numpy.ufunc size changed*")
+    warnings.filterwarnings("ignore", message="(Possibly )?corrupt EXIF data.*")
+    warnings.filterwarnings("ignore", message="numpy.dtype size changed.*")
+    warnings.filterwarnings("ignore", message="numpy.ufunc size changed.*")
 
 
 model_names = sorted(name for name in models.__dict__
@@ -103,8 +104,8 @@ def train(train_loader, model, criterion, optimizer,
         # measure data loading time
         data_time.update(time.time() - start_time)
 
-        images = images.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+        images = images.cuda()
+        target = target.cuda()
 
         # compute output
         output = model(images)
@@ -161,7 +162,7 @@ def validate(val_loader, model, criterion, epoch, logger):
     # switch to evaluate mode
     model.eval()
 
-    pbar = tqdm(enumerate(val_loader), total=len(val_loader))
+    pbar = tqdm(enumerate(val_loader), total=len(val_loader), ncols=180)
     with torch.no_grad():
         end = time.time()
         for i, (images, target) in pbar:
