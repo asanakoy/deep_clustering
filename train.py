@@ -35,9 +35,11 @@ if not sys.warnoptions:
     warnings.filterwarnings("ignore", message="numpy.ufunc size changed.*")
 
 
-model_names = sorted(name for name in models.__dict__
-                     if name[0].isupper() and not name.startswith("__")
-                     and callable(models.__dict__[name]))
+# model_names = sorted(name for name in models.__dict__
+#                      if name[0].isupper() and not name.startswith("__")
+#                      and callable(models.__dict__[name]))
+model_name = ['AlexNet', 'AlexNetSobel']
+
 MODELS_DIR = './results'
 
 parser = argparse.ArgumentParser(description='DeepClustering Training')
@@ -75,6 +77,9 @@ parser.add_argument('--pretrained', dest='pretrained', action='store_true',
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
 parser.add_argument('-suf', '--exp_suffix', default='', help='experiment suffix')
+parser.add_argument('-unsup', '--unsupervised', action='store_true',
+                    help='is unsupervised training?')
+
 parser.add_argument('-dbg', '--dbg', action='store_true',
                     help='is debug?')
 
@@ -200,7 +205,7 @@ def validate(val_loader, model, criterion, epoch, logger):
     logger.add_scalar('(train)avg_top5', top5.avg, epoch + 1)
     print('[VAL] epoch {}: Loss: {loss.avg:.3f} '
           'Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
-          .format(epoch, loss=losses, top1=top1, top5=top5))
+          .format(epoch + 1, loss=losses, top1=top1, top5=top5))
     return top1.avg
 
 
@@ -294,6 +299,10 @@ def main():
     logger = SummaryWriter(log_dir=args.output_dir)
 
     ### Data loading ###
+    if args.unsupervised:\
+        # TODO: extract features
+        # TODO: run clustering and get labels
+        pass
 
     split_dirs = dict()
     dataset_indices = dict()
@@ -319,6 +328,9 @@ def main():
     ]
     if not is_sobel:
         train_transforms.append(IMAGENET_NORMALIZE)
+    else:
+        # NOTE: May be use some other kind of normalization before sobel?
+        pass
 
     train_dataset = IndexedDataset(split_dirs['train'], dataset_indices['train'],
                                    transform=transforms.Compose(train_transforms))
