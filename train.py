@@ -27,7 +27,7 @@ from data_utils.index_imagenet import IndexedDataset
 from data_utils.transforms import IMAGENET_NORMALIZE, SIMPLE_NORMALIZE
 
 from lib import train, validate, validate_gt_linear, extract_features
-# import unsupervised.faissext
+import unsupervised.faissext
 from utils import save_checkpoint, AverageMeter, accuracy
 
 if not sys.warnoptions:
@@ -175,12 +175,14 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, split_dirs, dataset
         train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel, aug='central_crop',
                                           shuffle=False, num_workers=num_workers, return_index=True)
         features = extract_features(train_loader, model, args.clustering_layer)
-
         labels = unsupervised.faissext.do_clustering(features, args.num_clusters)
 
         # Evaluate NMI
         if 'labels_gt' not in labels_holder:
-            labels_holder['labels_gt'] = zip(*dataset_indices['train']['samples'])[0]
+            labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
+            assert len(np.unique(labels_holder['labels_gt'])) == 1000
+            assert labels_holder['labels_gt'].min() == 0
+            assert labels_holder['labels_gt'].max() == 999
         nmi = normalized_mutual_info_score(labels_holder['labels_gt'], labels)
         print 'NMI t / GT = {:.4f}'.format(nmi)
         logger.add_scalar('NMI', nmi, cur_epoch)
@@ -194,7 +196,7 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, split_dirs, dataset
         dataset_indices['train_unsupervised'] = {
             'classes': np.arange(args.num_clusters),
             'class_to_idx': {i: i for i in xrange(args.num_clusters)},
-            'samples': [(sample[0], lbl) for sample, lbl in zip(dataset_indices['train_unsupervised']['train'], labels)]
+            'samples': [(sample[0], lbl) for sample, lbl in zip(dataset_indices['train']['samples'], labels)]
         }
 
         train_loader = create_data_loader(split_dirs['train'], dataset_indices['train_unsupervised'], is_sobel, aug='random_crop_flip',
@@ -233,7 +235,7 @@ def main():
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        model = models.__dict__[args.arch](num_classes=args.num_clusters if args.unsupervised else 1000)
 
     model = torch.nn.DataParallel(model).cuda()
     criterion = nn.CrossEntropyLoss().cuda()
@@ -244,7 +246,7 @@ def main():
 
     experiment = "{}_lr{}_{}".format(args.arch, args.lr, 'unsup' if args.unsupervised else 'labels')
     if args.unsupervised:
-        experiment += '_nc{nc}_l{clustering_layer}_rec{rec_epoch}'.format(nc=args.number_clusters,
+        experiment += '_nc{nc}_l{clustering_layer}_rec{rec_epoch}'.format(nc=args.num_clusters,
                                                                           clustering_layer=args.clustering_layer,
                                                                           rec_epoch=args.recluster_epoch)
 
@@ -283,7 +285,8 @@ def main():
             print 'WARNING! NO best "score_found" in checkpoint!'
             best_score = 0
         print 'Best score:', best_score
-        print 'Current score:', checkpoint['cur_score']
+        if 'cur_score' in checkpoint:
+            print 'Current score:', checkpoint['cur_score']
         model.load_state_dict(checkpoint['state_dict'])
         print 'state dict loaded'
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -312,8 +315,12 @@ def main():
 
     assert dataset_indices['train']['class_to_idx'] == \
            dataset_indices['val']['class_to_idx']
+    if args.dbg:
+        max_images = 100000
+        print 'DBG: WARNING! Trauncate train datset to {} images'.format(max_images)
+        dataset_indices['train']['samples'] = dataset_indices['train']['samples'][:max_images]
 
-    num_workers = args.workers if args.unsupervised else max(1, args.workers / 2)
+    num_workers = args.workers  # if args.unsupervised else max(1, args.workers / 2)
 
     print '[TRAIN]...'
     if args.unsupervised:
@@ -345,7 +352,7 @@ def main():
     last_lr = 100500
     for epoch in range(start_epoch, args.epochs):
         if args.unsupervised and (epoch == start_epoch or epoch % args.recluster_epoch == 0):
-            train_loader = unsupervised_clustering_step(cur_epoch, model, is_sobel, split_dirs, dataset_indices,
+            train_loader = unsupervised_clustering_step(epoch, model, is_sobel, split_dirs, dataset_indices,
                                                         num_workers, labels_holder, logger)
         scheduler.step(epoch=epoch)
         if last_lr != scheduler.get_lr()[0]:
@@ -371,21 +378,24 @@ def main():
             is_best = score > best_score
             best_score = max(score, best_score)
         else:
+            score = None
             is_best = False
 
         if (epoch + 1) % save_epoch == 0:
             filepath = join(args.output_dir, 'checkpoint-{:05d}.pth.tar'.format(epoch + 1))
         else:
             filepath = join(args.output_dir, 'checkpoint.pth.tar')
-        save_checkpoint({
+        save_dict = {
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
-            'cur_score': score,
             'best_score': best_score,
             'top1_avg_accuracy_train': top1_avg,
             'optimizer': optimizer.state_dict(),
-        }, is_best=is_best, filepath=filepath)
+        }
+        if score is not None:
+            save_dict['cur_score'] = score
+        save_checkpoint(save_dict, is_best=is_best, filepath=filepath)
 
 
 if __name__ == '__main__':

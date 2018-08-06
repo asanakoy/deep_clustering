@@ -38,6 +38,7 @@ def train(train_loader, model, criterion, optimizer,
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output, target, topk=(1, 5))
+        print 'loss.item().__class__', loss.item().__class__
         losses.update(loss.item(), images.size(0))
         top1.update(prec1[0], images.size(0))
         top5.update(prec5[0], images.size(0))
@@ -173,7 +174,7 @@ def extract_features(data_loader, net, layer_name):
     Returns:
 
     """
-    assert data_loader.return_index, 'data loader must return index of an element as well'
+    assert data_loader.dataset.return_index, 'dataset must return an index of an element as well'
     net_trunc = AlexNetTruncated(net.module, layer_name).cuda()
     net_trunc.eval()
 
