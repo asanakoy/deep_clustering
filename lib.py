@@ -1,3 +1,4 @@
+import numpy as np
 import os
 from os.path import join
 import time
@@ -8,6 +9,7 @@ import torchvision
 import torch.utils.data
 from tqdm import tqdm
 
+from models.alexnet import AlexNetTruncated, AlexNetLinear
 from utils import save_checkpoint, AverageMeter, accuracy
 
 
@@ -127,3 +129,94 @@ def validate(val_loader, model, criterion, epoch, logger, tag='val'):
           'Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(tag=tag.upper(), epoch=epoch + 1, loss=losses, top1=top1, top5=top5))
     return top1.avg
+
+
+def validate_gt_linear(train_loader_gt, val_loader_gt, net, layer_name, criterion, epoch, lr=0.01, num_train_epochs=2, logger=None, tag='VAL_GT'):
+    """
+    Train a linear classifier on top of conv4 features and evaluate using GT labels.
+    """
+    assert num_train_epochs > 0, 'validate_gt_linear: num_train_epochs must be > 0'
+    net = torch.nn.DataParallel(AlexNetLinear(net.module, layer_name)).cuda()
+
+    optimizer = torch.optim.SGD(net.parameters(), lr,
+                                momentum=0.9,
+                                weight_decay=0.0005)
+
+    weight_sobel = net.module._modules['base_net']._modules['layers']._modules['sobel'].weight.data.cpu().numpy().copy()
+    weight_conv1 = net.module._modules['base_net']._modules['layers']._modules['0'].weight.data.cpu().numpy().copy()
+
+    for epoch in range(num_train_epochs):
+        train(train_loader_gt, net, criterion, optimizer,
+              epoch, num_train_epochs,
+              log_iter=100, logger=logger, tag='train_gt_linear')
+
+        weight_sobel_after = net.module._modules['base_net']._modules['layers']._modules['sobel'].weight.data.cpu().numpy().copy()
+        weight_conv1_after = net.module._modules['base_net']._modules['layers']._modules['0'].weight.data.cpu().numpy().copy()
+
+        assert np.is_close(weight_sobel, weight_sobel_after), 'Sobel weights changed!'
+        assert np.is_close(weight_conv1, weight_conv1_after), 'conv1 weights changed!'
+
+        acc = validate(val_loader_gt, net, criterion, epoch, logger, tag='val_gt_linear')
+        print '[] Prec@1'.format(tag.upper(), acc)
+    logger.add_scalar('({})avg_top1'.format(tag), acc, epoch + 1)
+    return acc
+
+
+def extract_features(data_loader, net, layer_name):
+    """
+    Extract features from the specific layer
+    Args:
+        data_loader:
+        net:
+        layer_name:
+
+    Returns:
+
+    """
+    assert data_loader.return_index, 'data loader must return index of an element as well'
+    net_trunc = AlexNetTruncated(net.module, layer_name).cuda()
+    net_trunc.eval()
+
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+
+    assert isinstance(data_loader.sampler, torch.utils.data.SequentialSampler), 'Data must be sequential!'
+    pbar = tqdm(enumerate(data_loader), total=len(data_loader), ncols=180)
+
+    indices = None
+    features = None
+    cur_pos = 0
+
+    with torch.no_grad():
+        start_time = time.time()
+        for i, (images, target, cur_indexes) in pbar:
+            data_time.update(time.time() - start_time)
+
+            images = images.cuda(non_blocking=True)
+            output = net_trunc(images)
+            batch_time.update(time.time() - start_time)
+
+            if features is None:
+                features_shape = (len(data_loader.dataset), np.prod(output.shape[1:]))
+                print 'Memory allocation for features (shape={})...'.format(features_shape)
+                features = np.zeros(features_shape, dtype=np.float32)
+                indices = np.zeros(features_shape[0], dtype=np.int32)
+            features[cur_pos:cur_pos + len(output), ...] = output
+            indices[cur_pos:cur_pos + len(output)] = cur_indexes
+            cur_pos += len(output)
+
+            pbar.set_description(
+                '[FEATS] \t'
+                'fetch {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                '{img_sec:.2f} im/s ({img_sec_avg:.2f} im/s))'.format(
+                data_time=data_time,
+                img_sec=len(images) / batch_time.val,
+                img_sec_avg=len(images) / batch_time.avg))
+
+            start_time = time.time()
+    assert cur_pos == len(features)
+    print 'Permute features in the appropriate order...'
+    start_time = time.time()
+    features = features[indices]
+    print 'Elapsed time: {:.3f} m'.format((time.time() - start_time) / 60.)
+    return features

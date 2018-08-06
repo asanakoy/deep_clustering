@@ -88,6 +88,25 @@ def compute_cluster_assignment(centroids, x):
     return labels.ravel()
 
 
+def do_clustering(features, num_clusters, num_gpus=None):
+    if num_gpus is None:
+        num_gpus = faiss.get_num_gpus()
+    print 'FAISS: using {} GPUs'.format(num_gpus)
+    features = np.asarray(features.reshape(features.shape[0], -1), dtype=np.float32)
+    features = preprocess_features(features)
+
+    print 'Run FAISS clustering...'
+    t0 = time.time()
+    centroids = train_kmeans(features, num_clusters, num_gpus)
+    print 'Compute cluster assignment'
+    labels = compute_cluster_assignment(centroids, features)
+    print 'centroids.shape:', centroids.shape
+    print 'labels.shape:', labels.shape
+    t1 = time.time()
+    print "Total elapsed time: %.3f m" % ((t1 - t0) / 60.0)
+    return labels
+
+
 def example():
     k = 1000
     ngpu = 1

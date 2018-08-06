@@ -66,7 +66,7 @@ class IndexedDataset(torchvision.datasets.ImageFolder):
 
     # noinspection PyMissingConstructor
     def __init__(self, root, index,
-                 loader=default_loader, transform=None, target_transform=None):
+                 loader=default_loader, transform=None, target_transform=None, return_index=False):
         if len(index['samples']) == 0:
             raise (RuntimeError("Empty index: " + root))
 
@@ -79,3 +79,23 @@ class IndexedDataset(torchvision.datasets.ImageFolder):
 
         self.transform = transform
         self.target_transform = target_transform
+        self.return_index = return_index
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (sample, target) where target is class_index of the target class.
+        """
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        if self.transform is not None:
+            sample = self.transform(sample)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+        if not self.return_index:
+            return sample, target
+        else:
+            return sample, target, index
