@@ -96,6 +96,8 @@ parser.add_argument('-eval_layer', '--eval_layer', default='conv3',
                     help='which layer to use for training a linear classifier (only for unsupervised training)')
 parser.add_argument('--sobel_normalized', action='store_true',
                     help='Normalize input image before Sobel filter?')
+parser.add_argument('--reset_fc', action='store_true',
+                    help='Reset fc8 after every #recluster_epoch epochs?')
 
 parser.add_argument('-dbg', '--dbg', action='store_true',
                     help='is debug?')
@@ -259,11 +261,12 @@ def main():
     experiment = "{}_lr{}_{}{}".format(args.arch, args.lr, 'unsup' if args.unsupervised else 'labels',
                                        '_v2' if args.imagenet_version == 2 else '')
     if args.unsupervised:
-        experiment += '{sobel_norm}_nc{nc}_l{clustering_layer}_rec{rec_epoch}'.format(
+        experiment += '{sobel_norm}_nc{nc}_l{clustering_layer}_rec{rec_epoch}{reset_fc}'.format(
                       sobel_norm='_normed' if args.sobel_normalized else '',
                       nc=args.num_clusters,
                       clustering_layer=args.clustering_layer,
-                      rec_epoch=args.recluster_epoch)
+                      rec_epoch=args.recluster_epoch,
+                      reset_fc='_reset-fc' if args.reset_fc else '')
 
     checkpoint = None
     if args.output_dir is None:
@@ -377,7 +380,7 @@ def main():
     if not args.unsupervised:
         validate_epoch = 1
     else:
-        validate_epoch = 1
+        validate_epoch = 50
         labels_holder = {}  # utility container to save labels from the previous clustering step
 
     last_lr = 100500
@@ -386,7 +389,7 @@ def main():
         if epoch == start_epoch:
             if not args.unsupervised:
                 validate(val_loader, model, criterion, epoch - 1, logger=logger)
-            else:
+            elif start_epoch == 0:
                 print 'validate_gt_linear'
                 validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
                                    model, args.eval_layer, criterion, epoch - 1, lr=0.01,
@@ -394,10 +397,11 @@ def main():
                                    logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
 
         if args.unsupervised and (epoch == start_epoch or epoch % args.recluster_epoch == 0):
-            # TODO: reset the last fc layer ?
             train_loader, nmi_gt = unsupervised_clustering_step(epoch, model, is_sobel, args.sobel_normalized,
                                                                 split_dirs, dataset_indices,
                                                                 num_workers, labels_holder, logger)
+            if args.reset_fc:
+                model.module.reset_fc8()
             try:
                 with open(join(args.output_dir, 'labels_holder.json'), 'w') as f:
                     for k in labels_holder.keys():

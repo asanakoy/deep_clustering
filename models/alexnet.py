@@ -67,6 +67,13 @@ class AlexNet(nn.Module):
         )
         self._initialize_weights()
 
+    def reset_fc8(self):
+        """Randomly initialize fc8 layer"""
+        weight = self.classifier._modules['fc8'].weight
+        bias = self.classifier._modules['fc8'].bias
+        nn.init.normal_(weight, 0, 0.005)
+        nn.init.constant_(bias, 0.1)
+
     def _initialize_weights(self):
         for name, m in self.named_modules():
             if isinstance(m, nn.Conv2d):
@@ -103,6 +110,9 @@ class AlexNetSobel(nn.Module):
         self.sobel = SobelFilter()
         self.features = self.alexnet.features
         self.classifier = self.alexnet.classifier
+
+    def reset_fc8(self):
+        self.alexnet.reset_fc8()
 
     def forward(self, x):
         x = self.sobel(x)
