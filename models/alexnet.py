@@ -138,16 +138,19 @@ class AlexNetTruncated(nn.Module):
 
 
 def get_output_tensor_shape(net):
-    img = np.asarray(Image.fromarray(scipy.misc.face()).resize((224, 224)))
-    img = ToTensor()(img).cuda()
-    imgs = torch.stack((img, img))
-    if torch.cuda.is_available():
-        imgs = imgs.cuda()
-    return net.forward(imgs).shape[1:]
+    net.eval()
+    with torch.no_grad():
+        img = np.asarray(Image.fromarray(scipy.misc.face()).resize((224, 224)))
+        img = ToTensor()(img).cuda()
+        imgs = torch.stack((img, img))
+        if torch.cuda.is_available():
+            net = net.cuda()
+            imgs = imgs.cuda()
+        return net.forward(imgs).shape[1:]
 
 
 class AlexNetLinear(nn.Module):
-    def __init__(self, net, layer_name, batch_norm_momentum=0.01):
+    def __init__(self, net, layer_name, batch_norm_momentum=0.01, num_classes=None):
         """
 
         Args:
@@ -155,10 +158,17 @@ class AlexNetLinear(nn.Module):
             layer_name: which layer to append the linear classifier to
         """
         super(AlexNetLinear, self).__init__()
-        self.num_classes = net.num_classes
+        if num_classes is None:
+            self.num_classes = net.num_classes
+        else:
+            self.num_classes = num_classes
         self.is_sobel = net.is_sobel
         self.base_net = AlexNetTruncated(net, layer_name=layer_name)
-        num_features = np.prod(get_output_tensor_shape(self.base_net))
+        if layer_name == 'conv3':
+            num_features = 64896
+        else:
+            num_features = np.prod(get_output_tensor_shape(self.base_net))
+        print 'FC layer size: {}x{}'.format(num_features, self.num_classes)
 
         self.linear = nn.Sequential(OrderedDict([
             ('ravel', RavelTensor()),

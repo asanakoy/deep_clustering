@@ -24,7 +24,8 @@ def train(train_loader, model, criterion, optimizer,
     model.train()
 
     start_time = time.time()
-    pbar = tqdm(enumerate(train_loader), total=len(train_loader), ncols=175)
+    pbar = tqdm(enumerate(train_loader), total=len(train_loader),
+                ncols=175, desc='[{tag}]'.format(tag=tag.upper()))
     for i, (images, target) in pbar:
         # measure data loading time
         data_time.update(time.time() - start_time)
@@ -37,11 +38,10 @@ def train(train_loader, model, criterion, optimizer,
         loss = criterion(output, target)
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(output, target, topk=(1, 5))
-        print 'loss.item().__class__', loss.item().__class__
+        prec1, prec5 = accuracy(output, target, topk=(1, 5))  # returns tensors!
         losses.update(loss.item(), images.size(0))
-        top1.update(prec1[0], images.size(0))
-        top5.update(prec5[0], images.size(0))
+        top1.update(prec1.item(), images.size(0))
+        top5.update(prec5.item(), images.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -89,7 +89,8 @@ def validate(val_loader, model, criterion, epoch, logger, tag='val'):
     # switch to evaluate mode
     model.eval()
 
-    pbar = tqdm(enumerate(val_loader), total=len(val_loader), ncols=180)
+    pbar = tqdm(enumerate(val_loader), total=len(val_loader),
+                ncols=180, desc='[{tag}]'.format(tag=tag.upper()))
     with torch.no_grad():
         end = time.time()
         for i, (images, target) in pbar:
@@ -103,8 +104,8 @@ def validate(val_loader, model, criterion, epoch, logger, tag='val'):
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, 5))
             losses.update(loss.item(), images.size(0))
-            top1.update(prec1[0], images.size(0))
-            top5.update(prec5[0], images.size(0))
+            top1.update(prec1.item(), images.size(0))
+            top5.update(prec5.item(), images.size(0))
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -132,34 +133,34 @@ def validate(val_loader, model, criterion, epoch, logger, tag='val'):
     return top1.avg
 
 
-def validate_gt_linear(train_loader_gt, val_loader_gt, net, layer_name, criterion, epoch, lr=0.01, num_train_epochs=2, logger=None, tag='VAL_GT'):
+def validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes, net, layer_name, criterion, epoch, lr=0.01, num_train_epochs=2, logger=None, tag='VAL_GT'):
     """
     Train a linear classifier on top of conv4 features and evaluate using GT labels.
     """
     assert num_train_epochs > 0, 'validate_gt_linear: num_train_epochs must be > 0'
-    net = torch.nn.DataParallel(AlexNetLinear(net.module, layer_name)).cuda()
+    net = nn.DataParallel(AlexNetLinear(net.module, layer_name, num_classes=num_gt_classes)).cuda()
 
-    optimizer = torch.optim.SGD(net.parameters(), lr,
+    optimizer = torch.optim.SGD(net.module.linear.parameters(), lr,
                                 momentum=0.9,
                                 weight_decay=0.0005)
 
     weight_sobel = net.module._modules['base_net']._modules['layers']._modules['sobel'].weight.data.cpu().numpy().copy()
     weight_conv1 = net.module._modules['base_net']._modules['layers']._modules['0'].weight.data.cpu().numpy().copy()
+    print 'Batch size:', train_loader_gt.batch_size
 
     for epoch in range(num_train_epochs):
         train(train_loader_gt, net, criterion, optimizer,
               epoch, num_train_epochs,
-              log_iter=100, logger=logger, tag='train_gt_linear')
+              log_iter=100, logger=logger, tag='train({})'.format(tag))
 
         weight_sobel_after = net.module._modules['base_net']._modules['layers']._modules['sobel'].weight.data.cpu().numpy().copy()
         weight_conv1_after = net.module._modules['base_net']._modules['layers']._modules['0'].weight.data.cpu().numpy().copy()
 
-        assert np.is_close(weight_sobel, weight_sobel_after), 'Sobel weights changed!'
-        assert np.is_close(weight_conv1, weight_conv1_after), 'conv1 weights changed!'
+        assert np.allclose(weight_sobel, weight_sobel_after), 'Sobel weights changed!'
+        assert np.allclose(weight_conv1, weight_conv1_after), 'conv1 weights changed!'
 
         acc = validate(val_loader_gt, net, criterion, epoch, logger, tag='val_gt_linear')
-        print '[] Prec@1'.format(tag.upper(), acc)
-    logger.add_scalar('({})avg_top1'.format(tag), acc, epoch + 1)
+        print '[{}] Prec@1 {}'.format(tag.upper(), acc)
     return acc
 
 
@@ -182,7 +183,7 @@ def extract_features(data_loader, net, layer_name):
     data_time = AverageMeter()
 
     assert isinstance(data_loader.sampler, torch.utils.data.SequentialSampler), 'Data must be sequential!'
-    pbar = tqdm(enumerate(data_loader), total=len(data_loader), ncols=180)
+    pbar = tqdm(enumerate(data_loader), total=len(data_loader), ncols=180, desc='[FEATS]')
 
     indices = None
     features = None
@@ -199,7 +200,7 @@ def extract_features(data_loader, net, layer_name):
 
             if features is None:
                 features_shape = (len(data_loader.dataset), np.prod(output.shape[1:]))
-                print 'Memory allocation for features (shape={})...'.format(features_shape)
+                print '\nMemory allocation for features (shape={})...'.format(features_shape)
                 features = np.zeros(features_shape, dtype=np.float32)
                 indices = np.zeros(features_shape[0], dtype=np.int32)
             features[cur_pos:cur_pos + len(output), ...] = output

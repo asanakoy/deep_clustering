@@ -2,3 +2,4 @@
 results
 *.pyc
 *.tar
+.ropeproject

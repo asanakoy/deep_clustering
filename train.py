@@ -1,4 +1,5 @@
 import argparse
+import collections
 import json
 import numpy as np
 import os
@@ -49,7 +50,10 @@ parser = argparse.ArgumentParser(description='DeepClustering Training')
 parser.add_argument('-data', metavar='DIR',
                     default='/export/home/asanakoy/workspace/datasets/ILSVRC2012',
                     help='path to dataset')
+parser.add_argument('-v', '--imagenet_version', type=int, default=1, choices=[1, 2],
+                    help='Images version. 1 - original, 2 - resized to 256.?')
 parser.add_argument('-o', '--output_dir', default=None, help='output dir')
+parser.add_argument('-best', '--from_best', action='store_true', help='Continue training from the best snapshot?')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='AlexNet',
                     choices=model_names,
                     help='model architecture: ' +
@@ -90,11 +94,13 @@ parser.add_argument('-l', '--clustering_layer', default='fc7',
                     help='which layer to extract features for clustering?')
 parser.add_argument('-eval_layer', '--eval_layer', default='conv3',
                     help='which layer to use for training a linear classifier (only for unsupervised training)')
+parser.add_argument('--sobel_normalized', action='store_true',
+                    help='Normalize input image before Sobel filter?')
 
 parser.add_argument('-dbg', '--dbg', action='store_true',
                     help='is debug?')
 
-best_score = 0
+args = parser.parse_args()
 
 
 def adjust_learning_rate(optimizer, epoch):
@@ -109,6 +115,7 @@ def collate_concat(batch):
        Can be used when each element produced by the transformer (or dataset) is already a group of several items.
        In this case we concatenate tensors and do not create an extra axis.
     """
+    elem_type = type(batch[0])
     if isinstance(batch[0], torch.Tensor):
         out = None
         if torch.utils.data.dataloader._use_shared_memory:
@@ -118,13 +125,23 @@ def collate_concat(batch):
             storage = batch[0].storage()._new_shared(numel)
             out = batch[0].new(storage)
         return torch.cat(batch, dim=0, out=out)
+    elif elem_type.__name__ == 'ndarray':
+        # collate targets for multicrops
+        assert len(batch[0].shape) == 1, batch[0].shape
+        return torch.from_numpy(np.hstack(batch))
+    elif isinstance(batch[0], collections.Sequence):
+        transposed = zip(*batch)
+        return [collate_concat(samples) for samples in transposed]
     else:
-        raise NotImplementedError()
+        raise NotImplementedError('Type: {}'.format(batch[0].__class__))
 
 
-def create_data_loader(split_dir, dataset_index, is_sobel, aug='central_crop', shuffle=False,
+def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=False, aug='central_crop',
+                       batch_size=args.batch_size,
+                       shuffle=False,
                        num_workers=2, return_index=False):
     print 'Creating train dataset... ({})'.format(aug)
+    target_transform = None
     if aug == 'random_crop_flip':
         transf = [
             transforms.RandomResizedCrop(224),
@@ -140,73 +157,73 @@ def create_data_loader(split_dir, dataset_index, is_sobel, aug='central_crop', s
         ]
         collate_fn = torch.utils.data.dataloader.default_collate
     elif aug == '10_crop':
+        assert not return_index, 'Not implemented for several crops per image'
         to_tensor = transforms.ToTensor()
         transf = [
             transforms.Resize(256),
             transforms.TenCrop(224),
             transforms.Lambda(lambda crops: torch.stack([to_tensor(crop) for crop in crops])),  # returns a 4D tensor
         ]
+        target_transform = transforms.Lambda(lambda x: np.array([x] * 10))
         collate_fn = collate_concat
     else:
         raise ValueError('Unknown aug:' + aug)
 
-    if not is_sobel:
+    if not is_sobel or sobel_normalized:
         if aug != '10_crop':
             transf.append(IMAGENET_NORMALIZE)
         else:
             transf.append(transforms.Lambda(lambda crops: torch.stack([IMAGENET_NORMALIZE(crop) for crop in crops])))
-    else:
-        # NOTE: May be use some other kind of normalization before sobel?
-        pass
 
     dataset = IndexedDataset(split_dir, dataset_index,
-                             transform=transforms.Compose(transf), return_index=return_index)
+                             transform=transforms.Compose(transf),
+                             target_transform=target_transform,
+                             return_index=return_index)
     loader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=args.batch_size, shuffle=shuffle,
+        batch_size=batch_size, shuffle=shuffle,
         num_workers=num_workers, pin_memory=True,
         collate_fn=collate_fn)
     return loader
 
 
-def unsupervised_clustering_step(cur_epoch, model, is_sobel, split_dirs, dataset_indices, num_workers, labels_holder, logger):
-    if args.unsupervised:
-        print '[TRAIN]...'
-        train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel, aug='central_crop',
-                                          shuffle=False, num_workers=num_workers, return_index=True)
-        features = extract_features(train_loader, model, args.clustering_layer)
-        labels = unsupervised.faissext.do_clustering(features, args.num_clusters)
+def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, split_dirs, dataset_indices, num_workers, labels_holder, logger):
+    print '[TRAIN]...'
+    train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
+                                      sobel_normalized=sobel_normalized, aug='central_crop',
+                                      batch_size=args.batch_size * 2,
+                                      shuffle=False, num_workers=num_workers, return_index=True)
+    features = extract_features(train_loader, model, args.clustering_layer)
+    labels = unsupervised.faissext.do_clustering(features, args.num_clusters)
+    labels_holder['labels'] = labels
 
-        # Evaluate NMI
-        if 'labels_gt' not in labels_holder:
-            labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
-            assert len(np.unique(labels_holder['labels_gt'])) == 1000
-            assert labels_holder['labels_gt'].min() == 0
-            assert labels_holder['labels_gt'].max() == 999
-        nmi = normalized_mutual_info_score(labels_holder['labels_gt'], labels)
-        print 'NMI t / GT = {:.4f}'.format(nmi)
-        logger.add_scalar('NMI', nmi, cur_epoch)
+    # Evaluate NMI
+    if 'labels_gt' not in labels_holder:
+        labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
+    nmi_gt = normalized_mutual_info_score(labels_holder['labels_gt'], labels)
+    print 'NMI t / GT = {:.4f}'.format(nmi_gt)
+    logger.add_scalar('NMI', nmi_gt, cur_epoch)
 
-        if 'labels_prev_step' in labels_holder:
-            nmi = normalized_mutual_info_score(labels_holder['labels_prev_step'], labels)
-            print 'NMI t / t-1 = {:.4f}'.format(nmi)
-            logger.add_scalar('NMI_t-1', nmi, cur_epoch)
-        labels_holder['labels_prev_step'] = labels
+    if 'labels_prev_step' in labels_holder:
+        nmi = normalized_mutual_info_score(labels_holder['labels_prev_step'], labels)
+        print 'NMI t / t-1 = {:.4f}'.format(nmi)
+        logger.add_scalar('NMI_t-1', nmi, cur_epoch)
+    labels_holder['labels_prev_step'] = labels
 
-        dataset_indices['train_unsupervised'] = {
-            'classes': np.arange(args.num_clusters),
-            'class_to_idx': {i: i for i in xrange(args.num_clusters)},
-            'samples': [(sample[0], lbl) for sample, lbl in zip(dataset_indices['train']['samples'], labels)]
-        }
+    dataset_indices['train_unsupervised'] = {
+        'classes': np.arange(args.num_clusters),
+        'class_to_idx': {i: i for i in xrange(args.num_clusters)},
+        'samples': [(sample[0], lbl) for sample, lbl in zip(dataset_indices['train']['samples'], labels)]
+    }
 
-        train_loader = create_data_loader(split_dirs['train'], dataset_indices['train_unsupervised'], is_sobel, aug='random_crop_flip',
-                                          shuffle=True, num_workers=num_workers)
-        return train_loader
+    train_loader = create_data_loader(split_dirs['train'], dataset_indices['train_unsupervised'], is_sobel,
+                                      sobel_normalized=sobel_normalized, aug='random_crop_flip',
+                                      shuffle=True, num_workers=num_workers)
+    return train_loader, nmi_gt
 
 
 def main():
-    global args, best_score, MODELS_DIR
-    args = parser.parse_args()
+    global args, MODELS_DIR
     print args
 
     if args.dbg:
@@ -229,14 +246,9 @@ def main():
     is_sobel = args.arch.endswith('Sobel')
     print 'is_sobel', is_sobel
 
-    if args.pretrained:
-        assert False, 'Not supported for now'
-        print("=> using pre-trained model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](pretrained=True)
-    else:
-        print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](num_classes=args.num_clusters if args.unsupervised else 1000)
 
+    print("=> creating model '{}'".format(args.arch))
+    model = models.__dict__[args.arch](num_classes=args.num_clusters if args.unsupervised else 1000)
     model = torch.nn.DataParallel(model).cuda()
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -244,18 +256,21 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
-    experiment = "{}_lr{}_{}".format(args.arch, args.lr, 'unsup' if args.unsupervised else 'labels')
+    experiment = "{}_lr{}_{}{}".format(args.arch, args.lr, 'unsup' if args.unsupervised else 'labels',
+                                       '_v2' if args.imagenet_version == 2 else '')
     if args.unsupervised:
-        experiment += '_nc{nc}_l{clustering_layer}_rec{rec_epoch}'.format(nc=args.num_clusters,
-                                                                          clustering_layer=args.clustering_layer,
-                                                                          rec_epoch=args.recluster_epoch)
+        experiment += '{sobel_norm}_nc{nc}_l{clustering_layer}_rec{rec_epoch}'.format(
+                      sobel_norm='_normed' if args.sobel_normalized else '',
+                      nc=args.num_clusters,
+                      clustering_layer=args.clustering_layer,
+                      rec_epoch=args.recluster_epoch)
 
     checkpoint = None
     if args.output_dir is None:
         args.output_dir = join(MODELS_DIR, experiment + '_' + args.exp_suffix)
 
     if args.output_dir is not None and os.path.exists(args.output_dir):
-        ckpt_path = join(args.output_dir, 'checkpoint.pth.tar')
+        ckpt_path = join(args.output_dir, 'checkpoint.pth.tar' if not args.from_best else 'model_best.pth.tar')
         if not os.path.isfile(ckpt_path):
             print "=> no checkpoint found at '{}'\nUsing model_best.pth.tar".format(ckpt_path)
             ckpt_path = join(args.output_dir, 'model_best.pth.tar')
@@ -284,6 +299,11 @@ def main():
         else:
             print 'WARNING! NO best "score_found" in checkpoint!'
             best_score = 0
+        if 'nmi' in checkpoint:
+            print 'Current NMI/GT:', checkpoint['nmi']
+        if 'best_nmi' in checkpoint:
+            best_nmi = checkpoint['best_nmi']
+            print 'Best NMI/GT:', best_nmi
         print 'Best score:', best_score
         if 'cur_score' in checkpoint:
             print 'Current score:', checkpoint['cur_score']
@@ -296,15 +316,19 @@ def main():
     else:
         start_epoch = 0
         best_score = 0
+        best_nmi = 0
 
     logger = SummaryWriter(log_dir=args.output_dir)
 
     ### Data loading ###
-    split_dirs = dict()
+    num_gt_classes = 1000
+    split_dirs = {
+        'train': join(args.data, 'train' if args.imagenet_version == 1 else 'train_256'),
+        'val': join(args.data, 'val' if args.imagenet_version == 1 else 'val_256')  # we get lower accuracy with cal_256, probably because of jpeg compression
+    }
     dataset_indices = dict()
     for key in ['train', 'val']:
-        split_dirs[key] = join(args.data, key)
-        index_path = join(args.data, key + '_index.json')
+        index_path = join(args.data, os.path.basename(split_dirs[key]) + '_index.json')
 
         if os.path.exists(index_path):
             with open(index_path) as json_file:
@@ -316,26 +340,33 @@ def main():
     assert dataset_indices['train']['class_to_idx'] == \
            dataset_indices['val']['class_to_idx']
     if args.dbg:
-        max_images = 100000
+        max_images = 1000
         print 'DBG: WARNING! Trauncate train datset to {} images'.format(max_images)
         dataset_indices['train']['samples'] = dataset_indices['train']['samples'][:max_images]
+        dataset_indices['val']['samples'] = dataset_indices['val']['samples'][:max_images]
 
     num_workers = args.workers  # if args.unsupervised else max(1, args.workers / 2)
 
     print '[TRAIN]...'
     if args.unsupervised:
-        train_loader_gt = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel, aug='random_crop_flip',
-                                          shuffle=True, num_workers=num_workers)
+        train_loader_gt = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
+                                             sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
+                                             shuffle=True, num_workers=num_workers)
         eval_gt_aug = '10_crop'
-        val_loader_gt = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel, aug=eval_gt_aug,
-                                           shuffle=False, num_workers=num_workers)
+        val_loader_gt = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
+                                           sobel_normalized=args.sobel_normalized, aug=eval_gt_aug,
+                                           batch_size=26,  # WARNING. Decrease the batch size because of Memory
+                                           shuffle=True, num_workers=num_workers)
     else:
-        train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel, aug='random_crop_flip',
+        train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
+                                          sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
                                           shuffle=True, num_workers=num_workers)
         print '[VAL]...'
         # with GT labels!
-        val_loader = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel, aug='central_crop',
-                                        shuffle=False, num_workers=num_workers)
+        val_loader = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
+                                        sobel_normalized=args.sobel_normalized, aug='central_crop',
+                                        batch_size=args.batch_size,
+                                        shuffle=True, num_workers=num_workers)
     ###############################################################################
 
     scheduler = StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
@@ -346,14 +377,35 @@ def main():
     if not args.unsupervised:
         validate_epoch = 1
     else:
-        validate_epoch = 10
+        validate_epoch = 1
         labels_holder = {}  # utility container to save labels from the previous clustering step
 
     last_lr = 100500
     for epoch in range(start_epoch, args.epochs):
+        nmi_gt = None
+        if epoch == start_epoch:
+            if not args.unsupervised:
+                validate(val_loader, model, criterion, epoch - 1, logger=logger)
+            else:
+                print 'validate_gt_linear'
+                validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
+                                   model, args.eval_layer, criterion, epoch - 1, lr=0.01,
+                                   num_train_epochs=2,
+                                   logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
+
         if args.unsupervised and (epoch == start_epoch or epoch % args.recluster_epoch == 0):
-            train_loader = unsupervised_clustering_step(epoch, model, is_sobel, split_dirs, dataset_indices,
-                                                        num_workers, labels_holder, logger)
+            # TODO: reset the last fc layer ?
+            train_loader, nmi_gt = unsupervised_clustering_step(epoch, model, is_sobel, args.sobel_normalized,
+                                                                split_dirs, dataset_indices,
+                                                                num_workers, labels_holder, logger)
+            try:
+                with open(join(args.output_dir, 'labels_holder.json'), 'w') as f:
+                    for k in labels_holder.keys():
+                        labels_holder[k] = np.asarray(labels_holder[k]).tolist()
+                    json.dump(labels_holder, f)
+            except Exception as e:
+                print e
+
         scheduler.step(epoch=epoch)
         if last_lr != scheduler.get_lr()[0]:
             last_lr = scheduler.get_lr()[0]
@@ -371,15 +423,24 @@ def main():
             if not args.unsupervised:
                 score = validate(val_loader, model, criterion, epoch, logger=logger)
             else:
-                score = validate_gt_linear(train_loader_gt, val_loader_gt, net, args.eval_layer, criterion, epoch, lr=0.01, num_train_epochs=2,
-                                           logger=None, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
+                score = validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
+                                           model, args.eval_layer, criterion, epoch,
+                                           lr=0.01, num_train_epochs=2,
+                                           logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
 
             # remember best prec@1 and save checkpoint
             is_best = score > best_score
             best_score = max(score, best_score)
+            best_ckpt_suffix = ''
         else:
             score = None
-            is_best = False
+            if nmi_gt is not None and nmi_gt > best_nmi:
+                best_nmi = nmi_gt
+                best_ckpt_suffix = '_nmi'
+                is_best = True
+            else:
+                is_best = False
+                best_ckpt_suffix = ''
 
         if (epoch + 1) % save_epoch == 0:
             filepath = join(args.output_dir, 'checkpoint-{:05d}.pth.tar'.format(epoch + 1))
@@ -393,9 +454,12 @@ def main():
             'top1_avg_accuracy_train': top1_avg,
             'optimizer': optimizer.state_dict(),
         }
+        if nmi_gt is not None:
+            save_dict['nmi'] = nmi_gt
+            save_dict['best_nmi'] = best_nmi
         if score is not None:
             save_dict['cur_score'] = score
-        save_checkpoint(save_dict, is_best=is_best, filepath=filepath)
+        save_checkpoint(save_dict, is_best=is_best, filepath=filepath, best_suffix=best_ckpt_suffix)
 
 
 if __name__ == '__main__':
