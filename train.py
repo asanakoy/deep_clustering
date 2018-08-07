@@ -196,6 +196,10 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
                                       batch_size=args.batch_size * 2,
                                       shuffle=False, num_workers=num_workers, return_index=True)
     features = extract_features(train_loader, model, args.clustering_layer)
+
+    if 'labels' in labels_holder:
+        labels_holder['labels_prev_step'] = labels_holder['labels']
+
     labels = unsupervised.faissext.do_clustering(features, args.num_clusters)
     labels_holder['labels'] = labels
 
@@ -210,7 +214,6 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
         nmi = normalized_mutual_info_score(labels_holder['labels_prev_step'], labels)
         print 'NMI t / t-1 = {:.4f}'.format(nmi)
         logger.add_scalar('NMI_t-1', nmi, cur_epoch)
-    labels_holder['labels_prev_step'] = labels
 
     dataset_indices['train_unsupervised'] = {
         'classes': np.arange(args.num_clusters),
@@ -389,12 +392,12 @@ def main():
         if epoch == start_epoch:
             if not args.unsupervised:
                 validate(val_loader, model, criterion, epoch - 1, logger=logger)
-            elif start_epoch == 0:
-                print 'validate_gt_linear'
-                validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
-                                   model, args.eval_layer, criterion, epoch - 1, lr=0.01,
-                                   num_train_epochs=2,
-                                   logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
+            # elif start_epoch == 0:
+            #     print 'validate_gt_linear'
+            #     validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
+            #                        model, args.eval_layer, criterion, epoch - 1, lr=0.01,
+            #                        num_train_epochs=2,
+            #                        logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
 
         if args.unsupervised and (epoch == start_epoch or epoch % args.recluster_epoch == 0):
             train_loader, nmi_gt = unsupervised_clustering_step(epoch, model, is_sobel, args.sobel_normalized,
@@ -415,6 +418,7 @@ def main():
             last_lr = scheduler.get_lr()[0]
             print 'LR := {}'.format(last_lr)
         logger.add_scalar('data/lr', scheduler.get_lr()[0], epoch)
+        logger.add_scalar('data/v', args.imagenet_version, epoch)
         logger.add_scalar('data/weight_decay', args.weight_decay, epoch)
 
         top1_avg, top5_avg, loss_avg = \
