@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, MultiStepLR
 import torchvision
 import torch.utils.data
 import torchvision.transforms as transforms
@@ -246,6 +246,8 @@ def main():
 
     # if torch.cuda.is_available() and not args.cuda:
     #     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
+    print 'CudNN:', torch.backends.cudnn.version()
+    print 'Run on {} GPUs'.format(torch.cuda.device_count())
     cudnn.benchmark = True
 
     is_sobel = args.arch.endswith('Sobel')
@@ -298,6 +300,9 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    start_epoch = 0
+    best_score = 0
+    best_nmi = 0
     if checkpoint is not None:
         start_epoch = checkpoint['epoch']
         if 'best_score' in checkpoint:
@@ -319,11 +324,6 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = args.lr
             param_group['initial_lr'] = args.lr
-    else:
-        start_epoch = 0
-        best_score = 0
-        best_nmi = 0
-
     logger = SummaryWriter(log_dir=args.output_dir)
 
     ### Data loading ###
@@ -375,7 +375,8 @@ def main():
                                         shuffle=True, num_workers=num_workers)
     ###############################################################################
 
-    scheduler = StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
+    # StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
+    scheduler = MultiStepLR(optimizer, milestones=[30, 60, 80], gamma=args.decay_gamma)
     print 'scheduler.base_lrs=', scheduler.base_lrs
     logger.add_scalar('data/batch_size', args.batch_size, start_epoch)
 
