@@ -18,7 +18,7 @@ if __name__ == '__main__':
                         help='path to dataset')
     parser.add_argument('--batch', type=int, default=256)
     parser.add_argument('--name', choices=['train', 'val'], default='train')
-    parser.add_argument('-j', '--njobs', type=int, default=2)
+    parser.add_argument('-j', '--njobs', type=int, default=10)
     parser.add_argument('-v', '--imagenet_version', type=int, default=1, choices=[1, 2],
                         help='Images version. 1 - original, 2 - resized to 256.?')
 
@@ -40,6 +40,7 @@ if __name__ == '__main__':
     assert dataset_indices['train']['class_to_idx'] == \
            dataset_indices['val']['class_to_idx']
 
+    # TODO: ise lmdb
     train_loader_gt = create_data_loader(split_dirs['train'], dataset_indices['train'], False,
                                          sobel_normalized=True, aug='random_crop_flip',
                                          shuffle=True, num_workers=args.njobs, batch_size=args.batch)
