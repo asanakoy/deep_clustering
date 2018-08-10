@@ -50,6 +50,7 @@ class NormalizeNp(object):
         Returns:
             Tensor: Normalized Tensor image.
         """
+        assert array.shape[0] == 3, array.shape
         for i in xrange(array.shape[0]):
             array[i, ...] -= self.mean[i]
             array[i, ...] /= self.std[i]

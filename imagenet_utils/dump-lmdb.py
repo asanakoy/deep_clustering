@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# File: dump-lmdb.py
+
 import numpy as np
 import cv2
 import os
