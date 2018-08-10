@@ -241,7 +241,7 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
             MapDataComponent, AugmentImageComponent, PrefetchDataZMQ
         lmdb_path = split_dir.rstrip('/') + '.lmdb'
         ds = create_lmdb_stream(lmdb_path, new_labels=overwrite_labels, shuffle=(shuffle == 'shuffle'), return_index=return_index)
-        nr_prefetch = buffer_size * 1.5
+        nr_prefetch = int(buffer_size * 1.5)
         if shuffle == 'shuffle_buffer':
             ds = LocallyShuffleData(ds, buffer_size=buffer_size)
             nr_prefetch = buffer_size
