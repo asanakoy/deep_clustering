@@ -48,6 +48,21 @@ def accuracy(output, target, topk=(1,)):
         return res
 
 
+class CyclicLr(object):
+    def __init__(self, start_epoch, init_lr=1e-2, num_epochs_per_cycle=12, epochs_pro_decay=2,
+                 lr_decay_factor=0.5):
+        self.start_epoch = start_epoch
+        self.init_lr = init_lr
+        self.lr_decay_factor = lr_decay_factor
+        self.num_epochs_per_cycle = num_epochs_per_cycle
+        self.epochs_pro_decay = epochs_pro_decay
+
+    def __call__(self, epoch):
+        cur_epoch_in_cycle = (epoch - self.start_epoch) % self.num_epochs_per_cycle
+        lr = self.init_lr * (self.lr_decay_factor ** int(cur_epoch_in_cycle / self.epochs_pro_decay))
+        return lr
+
+
 @contextmanager
 def timed_operation(msg, log_start=False, tformat='s'):
     """
