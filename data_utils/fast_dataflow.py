@@ -8,7 +8,10 @@ from tensorpack.dataflow.image import AugmentorList
 from tensorpack.utils import logger
 import torch
 from torchvision import transforms
+from tqdm import tqdm
 import cv2
+
+from data_utils.transforms import pil_to_np_array, IMAGENET_NORMALIZE_NP
 
 _use_shared_memory = False
 
@@ -19,7 +22,7 @@ class TorchBatchData(BatchData):
     It produces datapoints of the same number of components as ``ds``, but
     each component has one new extra dimension of size ``batch_size``.
     The batch can be either a list of original components, or (by default)
-    a numpy array of original components.
+    a Tensor of original components.
     """
 
     def __init__(self, ds, batch_size, remainder=False, use_list=False):
@@ -34,10 +37,15 @@ class TorchBatchData(BatchData):
                 If set to False, all produced datapoints are guaranteed to have the same batch size.
                 If set to True, `ds.size()` must be accurate.
             use_list (bool): if True, each component will contain a list
-                of datapoints instead of an numpy array of an extra dimension.
+                of datapoints instead of a Tensor with extra dimension.
         """
         super(TorchBatchData, self).__init__(ds, batch_size, remainder, use_list)
-        BatchData._aggregate_batch = TorchBatchData._aggregate_batch
+        # for compatibility with torch DataLoader
+        self.dataset = ds
+
+    def __iter__(self):
+        self.reset_state()
+        return self.get_data()
 
     @staticmethod
     def _aggregate_batch(data_holder, use_list=False):
@@ -122,28 +130,68 @@ class TorchAugmentorList(AugmentorList):
         pass
 
 
-def create_fat_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
-    ds = LMDBSerializer.load(lmdb_path, shuffle=shuffle)
-    ds = LocallyShuffleData(ds, buffer_size=5000)
-    ds = PrefetchData(ds, nr_prefetch=1000, nr_proc=1)
-    ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), 0)
+def create_lmdb_stream(lmdb_path, shuffle=False, new_labels=None, return_index=False):
+    from tensorpack.utils.serialize import loads
+    ds = LMDBData(lmdb_path, shuffle=shuffle)
+    if shuffle:
+        logger.warning('Performance may suffer when loading LMDB with shuffle=True.')
+
+    def desearialize_data_point(dp):
+        idx = int(dp[0])  # index from 0 to N
+        value = loads(dp[1])
+        assert len(value) == 2, len(value)
+        img_encoded, label = value
+        if new_labels is not None:
+            label = new_labels[idx]
+        if return_index:
+            return img_encoded, label, idx
+        else:
+            return img_encoded, label
+
+    return MapData(ds, desearialize_data_point)
+
+
+def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
+    # image_index = 0
+    # ds = LMDBSerializer.load(lmdb_path, shuffle=shuffle)
+    ds = create_lmdb_stream(lmdb_path, shuffle=shuffle, return_index=False)
+    ds = LocallyShuffleData(ds, buffer_size=10000)
+    # We use PrefetchData to launch the base LMDB Flow in only one process,
+    # and only parallelize the transformations with another
+    ds = PrefetchData(ds, nr_prefetch=5000, nr_proc=1)
+    ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), index=0)
 
     transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
-        lambda x: np.asarray(x),
+        pil_to_np_array,
+        IMAGENET_NORMALIZE_NP
     ])
 
-    ds = AugmentImageComponent(ds, TorchAugmentorList(transform), copy=False)
+    ds = AugmentImageComponent(ds, TorchAugmentorList(transform), index=0, copy=False)
     ds = PrefetchDataZMQ(ds, nr_proc=nr_proc)
     ds = TorchBatchData(ds, batch_size=batch_size, remainder=False)
     return ds
 
 
+# TODO: add __len__ method: __len__ = size
+# DataLoader.len() = number of batches
+
 if __name__ == '__main__':
-    split ='val'
+    split ='train'
     lmdb_path = '/export/home/asanakoy/workspace/datasets/ILSVRC2012/{}.lmdb'.format(split)
 
-    ds = create_fat_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False)
-    TestDataSpeed(ds, size=100, warmup=10).start()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--shuffle', action='store_true')
+    parser.add_argument('-j', '--njobs', type=int, default=10)
+    args = parser.parse_args()
+    ds = create_fast_lmdb_flow(lmdb_path, nr_proc=args.njobs, batch_size=256, shuffle=args.shuffle)
+    print 'len(ds):', len(ds)
+
+    for dp in tqdm(ds):
+        print dp[0].__class__, dp[1].__class__
+
+    for i in xrange(2):
+        TestDataSpeed(ds, size=100, warmup=10).start()

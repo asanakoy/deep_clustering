@@ -10,7 +10,8 @@ import torch.utils.data
 from tqdm import tqdm
 
 from models.alexnet import AlexNetTruncated, AlexNetLinear
-from utils import save_checkpoint, AverageMeter, accuracy
+from utils import save_checkpoint, AverageMeter, accuracy, timed_operation
+from data_utils.fast_dataflow import TorchBatchData
 
 
 def train(train_loader, model, criterion, optimizer,
@@ -175,14 +176,13 @@ def extract_features(data_loader, net, layer_name):
     Returns:
 
     """
-    assert data_loader.dataset.return_index, 'dataset must return an index of an element as well'
     net_trunc = AlexNetTruncated(net.module, layer_name).cuda()
     net_trunc.eval()
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
-    assert isinstance(data_loader.sampler, torch.utils.data.SequentialSampler), 'Data must be sequential!'
+    assert isinstance(data_loader, TorchBatchData) or isinstance(data_loader.sampler, torch.utils.data.SequentialSampler), 'Data must be sequential!'
     pbar = tqdm(enumerate(data_loader), total=len(data_loader), ncols=180, desc='[FEATS]')
 
     indices = None
@@ -217,8 +217,6 @@ def extract_features(data_loader, net, layer_name):
 
             start_time = time.time()
     assert cur_pos == len(features)
-    print 'Permute features in the appropriate order...'
-    start_time = time.time()
-    features = features[indices]
-    print 'Elapsed time: {:.3f} m'.format((time.time() - start_time) / 60.)
+    with timed_operation('Permute features in the appropriate order...', log_start=True, tformat='m'):
+        features = features[indices]
     return features

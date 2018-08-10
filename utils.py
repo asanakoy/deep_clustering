@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+import time
 import torch
 import shutil
 import os
@@ -44,3 +46,42 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+
+
+@contextmanager
+def timed_operation(msg, log_start=False, tformat='s'):
+    """
+    Surround a context with a timer.
+
+    Args:
+        msg(str): the log to print.
+        log_start(bool): whether to print also at the beginning.
+        format: one of {s, m, h} - seconds, minutes or hours
+    Example:
+        .. code-block:: python
+
+            with timed_operation('Good Stuff'):
+                time.sleep(1)
+
+        Will print:
+
+        .. code-block:: python
+
+            Good stuff finished, time:1sec.
+    """
+    if log_start:
+        print('Start {} ...'.format(msg))
+    start = time.time()
+    yield
+    if tformat == 's':
+        ns = 1.
+    if tformat == 'm':
+        ns = 60.
+    elif tformat == 'h':
+        ns = 60.0**2
+    elif tformat == 'd':
+        ns = 60.0**2 * 24.0
+    else:
+        raise ValueError('Unknown tformat={}'.format(tformat))
+    print('{} finished, time:{:.4f}{}.'.format(
+        msg, (time.time() - start) / ns, tformat))

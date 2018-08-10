@@ -26,6 +26,7 @@ import models
 from data_utils.index_imagenet import index_imagenet
 from data_utils.index_imagenet import IndexedDataset
 from data_utils.transforms import IMAGENET_NORMALIZE, SIMPLE_NORMALIZE
+from data_utils.transforms import IMAGENET_NORMALIZE_NP, pil_to_np_array
 
 from lib import train, validate, validate_gt_linear, extract_features
 import unsupervised.faissext
@@ -52,6 +53,8 @@ parser.add_argument('-data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-v', '--imagenet_version', type=int, default=1, choices=[1, 2],
                     help='Images version. 1 - original, 2 - resized to 256.?')
+parser.add_argument('-fdf', '--fast_dataflow', action='store_true',
+                    help='use fast dataflow (lmdb + Tensorpack)?')
 parser.add_argument('-o', '--output_dir', default=None, help='output dir')
 parser.add_argument('-best', '--from_best', action='store_true', help='Continue training from the best snapshot?')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='AlexNet',
@@ -140,9 +143,37 @@ def collate_concat(batch):
 
 def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=False, aug='central_crop',
                        batch_size=args.batch_size,
-                       shuffle=False,
-                       num_workers=2, return_index=False):
-    print 'Creating train dataset... ({})'.format(aug)
+                       shuffle=None,
+                       num_workers=2, return_index=False, use_fast_dataflow=False, overwrite_labels=None):
+    """
+    
+    Args:
+        split_dir: 
+        dataset_index: used only if use_fast_dataflow=True
+        is_sobel: 
+        sobel_normalized: 
+        aug: 
+        batch_size: 
+        shuffle: one of:
+            - None: no shuffle
+            - 'shuffle': normal shuffle
+            - 'shuffle_buffer': shuffle only locally using a buffer. Cannot be used if use_fast_dataflow=False
+        num_workers: 
+        return_index: 
+        use_fast_dataflow: use fast dataFlow based on Tensorpack? 
+                If num_workers > 1 can produce duplicates of the datapoints.
+        overwrite_labels (np.array): list of labels which will be used instead of stored in lmdb.
+            Has no effect if use_fast_dataflow=False.
+
+    Returns:
+
+    """
+    if shuffle not in [None, 'shuffle', 'shuffle_buffer']:
+        raise ValueError('Unknown shuffle value: {}'.format(shuffle))
+    if shuffle == 'shuffle_buffer' and not use_fast_dataflow:
+        raise ValueError('Cannot use shuffle="shuffle_buffer" when use_fast_dataflow=False.')
+
+    print 'Creating dataset... ({})'.format(aug)
     target_transform = None
     if aug == 'random_crop_flip':
         transf = [
@@ -171,30 +202,58 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
     else:
         raise ValueError('Unknown aug:' + aug)
 
-    if not is_sobel or sobel_normalized:
-        if aug != '10_crop':
-            transf.append(IMAGENET_NORMALIZE)
-        else:
-            transf.append(transforms.Lambda(lambda crops: torch.stack([IMAGENET_NORMALIZE(crop) for crop in crops])))
+    if not use_fast_dataflow:
+        if not is_sobel or sobel_normalized:
+            if aug != '10_crop':
+                transf.append(IMAGENET_NORMALIZE)
+            else:
+                transf.append(transforms.Lambda(lambda crops: torch.stack([IMAGENET_NORMALIZE(crop) for crop in crops])))
 
-    dataset = IndexedDataset(split_dir, dataset_index,
-                             transform=transforms.Compose(transf),
-                             target_transform=target_transform,
-                             return_index=return_index)
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size, shuffle=shuffle,
-        num_workers=num_workers, pin_memory=True,
-        collate_fn=collate_fn)
+        dataset = IndexedDataset(split_dir, dataset_index,
+                                 transform=transforms.Compose(transf),
+                                 target_transform=target_transform,
+                                 return_index=return_index)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size, shuffle=shuffle == 'shuffle',
+            num_workers=num_workers, pin_memory=True,
+            collate_fn=collate_fn)
+    else:
+        if aug == '10_crop':
+            raise NotImplementedError('FastDataFlow for aug=10_crop is not implemented yet!')
+        import cv2
+        from data_utils.fast_dataflow import create_lmdb_stream, TorchAugmentorList, TorchBatchData
+        from tensorpack import LocallyShuffleData, PrefetchData, \
+            MapDataComponent, AugmentImageComponent, PrefetchDataZMQ
+        lmdb_path = split_dir.rstrip('/') + '.lmdb'
+        ds = create_lmdb_stream(lmdb_path, new_labels=overwrite_labels, shuffle=(shuffle == 'shuffle'), return_index=return_index)
+        nr_prefetch = 15000
+        if shuffle == 'shuffle_buffer':
+            ds = LocallyShuffleData(ds, buffer_size=15000)
+            nr_prefetch = 5000
+        ds = PrefetchData(ds, nr_prefetch=nr_prefetch, nr_proc=1)  # will ensure that LMDB Flow is not forked.
+        ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), index=0)
+
+        assert isinstance(transf[-1], transforms.ToTensor)
+        transform_list = [transforms.ToPILImage()] + transf[:-1] + [pil_to_np_array]
+        if not is_sobel or sobel_normalized:
+            transform_list.append(IMAGENET_NORMALIZE_NP)
+
+        ds = AugmentImageComponent(ds, TorchAugmentorList(transforms.Compose(transform_list)), index=0, copy=False)
+        ds = PrefetchDataZMQ(ds, nr_proc=num_workers)
+        loader = TorchBatchData(ds, batch_size=batch_size, remainder=False)
+
     return loader
 
 
-def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, split_dirs, dataset_indices, num_workers, labels_holder, logger):
+def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, split_dirs, dataset_indices, num_workers, labels_holder,
+                                 logger, use_fast_dataflow):
     print '[TRAIN]...'
     train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
                                       sobel_normalized=sobel_normalized, aug='central_crop',
                                       batch_size=args.batch_size * 2,
-                                      shuffle=False, num_workers=num_workers, return_index=True)
+                                      shuffle=None, num_workers=num_workers, return_index=True,
+                                      use_fast_dataflow=use_fast_dataflow)
     features = extract_features(train_loader, model, args.clustering_layer)
 
     if 'labels' in labels_holder:
@@ -205,7 +264,12 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
 
     # Evaluate NMI
     if 'labels_gt' not in labels_holder:
-        labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
+        if not use_fast_dataflow:
+            labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
+        else:
+            # load labels of teh items stored in the LMDB (in teh same order as in the database)
+            labels_holder['labels_gt'] = np.load(join(split_dirs['train'].strip('/') + '_lmdb_index.npy'))[:, 1]
+
     nmi_gt = normalized_mutual_info_score(labels_holder['labels_gt'], labels)
     print 'NMI t / GT = {:.4f}'.format(nmi_gt)
     logger.add_scalar('NMI', nmi_gt, cur_epoch)
@@ -223,7 +287,9 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
 
     train_loader = create_data_loader(split_dirs['train'], dataset_indices['train_unsupervised'], is_sobel,
                                       sobel_normalized=sobel_normalized, aug='random_crop_flip',
-                                      shuffle=True, num_workers=num_workers)
+                                      shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
+                                      num_workers=num_workers, overwrite_labels=labels,
+                                      use_fast_dataflow=use_fast_dataflow)
     return train_loader, nmi_gt
 
 
@@ -357,22 +423,25 @@ def main():
     if args.unsupervised:
         train_loader_gt = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
                                              sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
-                                             shuffle=True, num_workers=num_workers)
+                                             shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
+                                             num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
         eval_gt_aug = '10_crop'
         val_loader_gt = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
                                            sobel_normalized=args.sobel_normalized, aug=eval_gt_aug,
                                            batch_size=26,  # WARNING. Decrease the batch size because of Memory
-                                           shuffle=True, num_workers=num_workers)
+                                           shuffle='shuffle', num_workers=num_workers, use_fast_dataflow=False)
     else:
         train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
                                           sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
-                                          shuffle=True, num_workers=num_workers)
+                                          shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
+                                          num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
         print '[VAL]...'
         # with GT labels!
         val_loader = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
                                         sobel_normalized=args.sobel_normalized, aug='central_crop',
                                         batch_size=args.batch_size,
-                                        shuffle=True, num_workers=num_workers)
+                                        shuffle='shuffle' if not args.fast_dataflow else None,
+                                        num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
     ###############################################################################
 
     # StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
@@ -403,7 +472,7 @@ def main():
         if args.unsupervised and (epoch == start_epoch or epoch % args.recluster_epoch == 0):
             train_loader, nmi_gt = unsupervised_clustering_step(epoch, model, is_sobel, args.sobel_normalized,
                                                                 split_dirs, dataset_indices,
-                                                                num_workers, labels_holder, logger)
+                                                                num_workers, labels_holder, logger, args.fast_dataflow)
             if args.reset_fc:
                 model.module.reset_fc8()
             try:
