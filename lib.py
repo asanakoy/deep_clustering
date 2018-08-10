@@ -217,6 +217,7 @@ def extract_features(data_loader, net, layer_name):
 
             start_time = time.time()
     assert cur_pos == len(features)
+    assert cur_pos == len(indices)
     assert len(indices) == len(np.unique(indices)), len(np.unique(indices))
     permutation = np.arange(len(indices))[np.argsort(indices)]
 

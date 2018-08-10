@@ -151,11 +151,11 @@ def create_lmdb_stream(lmdb_path, shuffle=False, new_labels=None, return_index=F
     return MapData(ds, desearialize_data_point)
 
 
-def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
+def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False, return_index=False):
     # image_index = 0
     # ds = LMDBSerializer.load(lmdb_path, shuffle=shuffle)
-    ds = create_lmdb_stream(lmdb_path, shuffle=shuffle, return_index=False)
-    ds = LocallyShuffleData(ds, buffer_size=10000)
+    ds = create_lmdb_stream(lmdb_path, shuffle=shuffle, return_index=return_index)
+    # ds = LocallyShuffleData(ds, buffer_size=10000)
     # We use PrefetchData to launch the base LMDB Flow in only one process,
     # and only parallelize the transformations with another
     ds = PrefetchData(ds, nr_prefetch=5000, nr_proc=1)
@@ -169,7 +169,7 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
     ])
     ds = AugmentImageComponent(ds, TorchAugmentorList(transform), index=0, copy=False)
     ds = PrefetchDataZMQ(ds, nr_proc=nr_proc)
-    ds = TorchBatchData(ds, batch_size=batch_size, remainder=False)
+    ds = TorchBatchData(ds, batch_size=batch_size, remainder=True)
     return ds
 
 
@@ -177,7 +177,7 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
 # DataLoader.len() = number of batches
 
 if __name__ == '__main__':
-    split ='train'
+    split ='val'
     lmdb_path = '/export/home/asanakoy/workspace/datasets/ILSVRC2012/{}.lmdb'.format(split)
 
     import argparse
@@ -185,11 +185,21 @@ if __name__ == '__main__':
     parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('-j', '--njobs', type=int, default=10)
     args = parser.parse_args()
-    ds = create_fast_lmdb_flow(lmdb_path, nr_proc=args.njobs, batch_size=256, shuffle=args.shuffle)
+    ds = create_fast_lmdb_flow(lmdb_path, nr_proc=args.njobs, batch_size=256, shuffle=args.shuffle, return_index=True)
     print 'len(ds):', len(ds)
 
-    # for dp in tqdm(ds):
-    #     print dp[0].__class__, dp[1].__class__
+    indices = []
+    indices_set = set()
+    for img, label, idx in tqdm(ds):
+        indices.append(idx)
+        if idx is indices_set:
+            print 'Warning idx={} is already in the set'.format(idx)
+        else:
+            indices_set.add(idx)
 
-    for i in xrange(2):
-        TestDataSpeed(ds, size=100, warmup=10).start()
+    print len(indices), len(indices_set)
+
+    import ipython
+    ipython.embed()
+    # for i in xrange(2):
+    #     TestDataSpeed(ds, size=100, warmup=10).start()
