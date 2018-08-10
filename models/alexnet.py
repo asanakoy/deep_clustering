@@ -30,7 +30,7 @@ class AlexNet(nn.Module):
         'pool5': 17
     }
 
-    def __init__(self, input_channels=3, num_classes=1000, batch_norm_momentum=0.01):
+    def __init__(self, input_channels=3, num_classes=1000, batch_norm_momentum=0.01, dropout7_prob=0.5):
         super(AlexNet, self).__init__()
         self.num_classes = num_classes
         self.is_sobel = False
@@ -62,7 +62,7 @@ class AlexNet(nn.Module):
             ('fc7', nn.Linear(4096, 4096)),
             ('bn7', nn.BatchNorm1d(4096, momentum=batch_norm_momentum)),
             ('relu7', nn.ReLU(inplace=True)),
-            ('dropout7', nn.Dropout()),  # don't use this one ? Training from noise didn't use
+            ('dropout7', nn.Dropout(p=dropout7_prob)),  # don't use this one ? Training from noise didn't use
             ('fc8', nn.Linear(4096, num_classes))])
         )
         self._initialize_weights()
@@ -102,10 +102,11 @@ class AlexNetSobel(nn.Module):
     Alexnet with fixed Sobel filter as the 0-th layer.
     """
 
-    def __init__(self, num_classes=1000, batch_norm_momentum=0.01):
+    def __init__(self, num_classes=1000, batch_norm_momentum=0.01, dropout7_prob=0.5):
         super(AlexNetSobel, self).__init__()
         self.num_classes = num_classes
-        self.alexnet = AlexNet(input_channels=2, num_classes=num_classes, batch_norm_momentum=batch_norm_momentum)
+        self.alexnet = AlexNet(input_channels=2, num_classes=num_classes,
+                               batch_norm_momentum=batch_norm_momentum, dropout7_prob=dropout7_prob)
         self.is_sobel = True
         self.sobel = SobelFilter()
         self.features = self.alexnet.features

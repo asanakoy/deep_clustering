@@ -78,6 +78,8 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=0.0005, type=float,
                     metavar='W', help='weight decay (default: 0.0005)')
+parser.add_argument('-dp7', '--dropout7_prob', default=0.5, type=float,
+                    help='dropout probability after FC7')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
@@ -241,7 +243,7 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
 
         ds = AugmentImageComponent(ds, TorchAugmentorList(transforms.Compose(transform_list)), index=0, copy=False)
         ds = PrefetchDataZMQ(ds, nr_proc=num_workers)
-        loader = TorchBatchData(ds, batch_size=batch_size, remainder=False)
+        loader = TorchBatchData(ds, batch_size=batch_size, remainder=True)
 
     return loader
 
@@ -321,7 +323,7 @@ def main():
 
 
     print("=> creating model '{}'".format(args.arch))
-    model = models.__dict__[args.arch](num_classes=args.num_clusters if args.unsupervised else 1000)
+    model = models.__dict__[args.arch](num_classes=args.num_clusters if args.unsupervised else 1000, dropout7_prob=args.dropout7_prob)
     model = torch.nn.DataParallel(model).cuda()
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -490,6 +492,7 @@ def main():
         logger.add_scalar('data/lr', scheduler.get_lr()[0], epoch)
         logger.add_scalar('data/v', args.imagenet_version, epoch)
         logger.add_scalar('data/weight_decay', args.weight_decay, epoch)
+        logger.add_scalar('data/dropout7_prob', args.dropout7_prob, epoch)
 
         top1_avg, top5_avg, loss_avg = \
             train(train_loader, model, criterion, optimizer,
