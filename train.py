@@ -78,7 +78,7 @@ parser.add_argument('--decay_step', type=float, default=26, metavar='EPOCHS',
                     help='learning rate decay step')
 parser.add_argument('--decay_gamma', type=float, default=0.1,
                     help='learning rate decay coeeficient')
-parser.add_argument('--scheduler', choices=['multi_step', 'cyclic'], default='multi_step',
+parser.add_argument('--scheduler', choices=['multi_step', 'multi_step2', 'cyclic'], default='multi_step',
                     help='learning rate scheduler')
 parser.add_argument('--cycle', type=int, default=20,
                     help='num epochs in cycle (for --scheduler="cyclic")')
@@ -477,6 +477,8 @@ def main():
     # StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
     if args.scheduler == 'multi_step':
         scheduler = MultiStepLR(optimizer, milestones=[30, 60, 80], gamma=args.decay_gamma)
+    elif args.scheduler == 'multi_step2':
+        scheduler = MultiStepLR(optimizer, milestones=[50, 100], gamma=args.decay_gamma)
     elif args.scheduler == 'cyclic':
         print 'Using Cyclic LR!'
         cyclic_lr = CyclicLr(start_epoch if args.reset_lr else 0, init_lr=args.lr, num_epochs_per_cycle=args.cycle,
