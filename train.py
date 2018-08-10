@@ -56,6 +56,9 @@ parser.add_argument('-v', '--imagenet_version', type=int, default=1, choices=[1,
                     help='Images version. 1 - original, 2 - resized to 256.?')
 parser.add_argument('-fdf', '--fast_dataflow', action='store_true',
                     help='use fast dataflow (lmdb + Tensorpack)?')
+parser.add_argument('-buffer', '--buffer_size', default=5000, type=int, metavar='BSIZE',
+                    help='size of teh buffer when using fast dataflow (default: 5000)')
+
 parser.add_argument('-o', '--output_dir', default=None, help='output dir')
 parser.add_argument('-best', '--from_best', action='store_true', help='Continue training from the best snapshot?')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='AlexNet',
@@ -154,7 +157,8 @@ def collate_concat(batch):
 def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=False, aug='central_crop',
                        batch_size=args.batch_size,
                        shuffle=None,
-                       num_workers=2, return_index=False, use_fast_dataflow=False, overwrite_labels=None):
+                       num_workers=2, return_index=False, use_fast_dataflow=False, overwrite_labels=None,
+                       buffer_size=5000):
     """
     
     Args:
@@ -237,10 +241,10 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
             MapDataComponent, AugmentImageComponent, PrefetchDataZMQ
         lmdb_path = split_dir.rstrip('/') + '.lmdb'
         ds = create_lmdb_stream(lmdb_path, new_labels=overwrite_labels, shuffle=(shuffle == 'shuffle'), return_index=return_index)
-        nr_prefetch = 15000
+        nr_prefetch = buffer_size * 1.5
         if shuffle == 'shuffle_buffer':
-            ds = LocallyShuffleData(ds, buffer_size=15000)
-            nr_prefetch = 5000
+            ds = LocallyShuffleData(ds, buffer_size=buffer_size)
+            nr_prefetch = buffer_size
         ds = PrefetchData(ds, nr_prefetch=nr_prefetch, nr_proc=1)  # will ensure that LMDB Flow is not forked.
         # This will decode images with BGR channel order
         ds = MapDataComponent(ds, lambda x: np.ascontiguousarray(cv2.imdecode(x, cv2.IMREAD_COLOR)), index=0)
@@ -264,7 +268,7 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
                                       sobel_normalized=sobel_normalized, aug='central_crop',
                                       batch_size=args.batch_size * 2,
                                       shuffle=None, num_workers=num_workers, return_index=True,
-                                      use_fast_dataflow=use_fast_dataflow)
+                                      use_fast_dataflow=use_fast_dataflow, buffer_size=args.buffer_size)
     features = extract_features(train_loader, model, args.clustering_layer)
 
     if 'labels' in labels_holder:
@@ -300,7 +304,7 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
                                       sobel_normalized=sobel_normalized, aug='random_crop_flip',
                                       shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
                                       num_workers=num_workers, overwrite_labels=labels,
-                                      use_fast_dataflow=use_fast_dataflow)
+                                      use_fast_dataflow=use_fast_dataflow, buffer_size=args.buffer_size)
     return train_loader, nmi_gt
 
 
@@ -435,24 +439,28 @@ def main():
         train_loader_gt = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
                                              sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
                                              shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
-                                             num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
+                                             num_workers=num_workers, use_fast_dataflow=args.fast_dataflow,
+                                             buffer_size=args.buffer_size)
         eval_gt_aug = '10_crop'
         val_loader_gt = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
                                            sobel_normalized=args.sobel_normalized, aug=eval_gt_aug,
                                            batch_size=26,  # WARNING. Decrease the batch size because of Memory
-                                           shuffle='shuffle', num_workers=num_workers, use_fast_dataflow=False)
+                                           shuffle='shuffle', num_workers=num_workers, use_fast_dataflow=False,
+                                           buffer_size=args.buffer_size)
     else:
         train_loader = create_data_loader(split_dirs['train'], dataset_indices['train'], is_sobel,
                                           sobel_normalized=args.sobel_normalized, aug='random_crop_flip',
                                           shuffle='shuffle' if not args.fast_dataflow else 'shuffle_buffer',
-                                          num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
+                                          num_workers=num_workers, use_fast_dataflow=args.fast_dataflow,
+                                          buffer_size=args.buffer_size)
         print '[VAL]...'
         # with GT labels!
         val_loader = create_data_loader(split_dirs['val'], dataset_indices['val'], is_sobel,
                                         sobel_normalized=args.sobel_normalized, aug='central_crop',
                                         batch_size=args.batch_size,
                                         shuffle='shuffle' if not args.fast_dataflow else None,
-                                        num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
+                                        num_workers=num_workers, use_fast_dataflow=args.fast_dataflow,
+                                        buffer_size=args.buffer_size)
     ###############################################################################
 
 
