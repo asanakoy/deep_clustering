@@ -217,6 +217,9 @@ def extract_features(data_loader, net, layer_name):
 
             start_time = time.time()
     assert cur_pos == len(features)
+    assert len(indices) == len(np.unique(indices)), len(np.unique(indices))
+    permutation = np.arange(len(indices))[np.argsort(indices)]
+
     with timed_operation('Permute features in the appropriate order...', log_start=True, tformat='m'):
-        features = features[indices]
+        features = features[permutation]
     return features
