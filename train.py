@@ -421,7 +421,7 @@ def main():
         dataset_indices['train']['samples'] = dataset_indices['train']['samples'][:max_images]
         dataset_indices['val']['samples'] = dataset_indices['val']['samples'][:max_images]
         print 'DBG: WARNING! train dir = val dir'
-        split_dirs['train'] - split_dirs['val']
+        split_dirs['train'] = split_dirs['val']
 
     num_workers = args.workers  # if args.unsupervised else max(1, args.workers / 2)
 
