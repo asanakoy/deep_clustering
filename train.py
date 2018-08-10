@@ -363,6 +363,16 @@ def main():
         if not os.path.isfile(ckpt_path):
             print "=> no checkpoint found at '{}'\nUsing model_best.pth.tar".format(ckpt_path)
             ckpt_path = join(args.output_dir, 'model_best.pth.tar')
+
+        if os.path.isfile(ckpt_path):
+            print("=> loading checkpoint '{}'".format(ckpt_path))
+            checkpoint = torch.load(ckpt_path)
+            print(
+                "=> loaded checkpoint '{}' (epoch {})".format(ckpt_path, checkpoint['epoch']))
+        else:
+            print "=> no checkpoint found at '{}'\nUsing model_best_nmi.pth.tar".format(ckpt_path)
+            ckpt_path = join(args.output_dir, 'model_best_nmi.pth.tar')
+
         if os.path.isfile(ckpt_path):
             print("=> loading checkpoint '{}'".format(ckpt_path))
             checkpoint = torch.load(ckpt_path)
