@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
-from torch.optim.lr_scheduler import StepLR, MultiStepLR
+from torch.optim.lr_scheduler import StepLR, MultiStepLR, LambdaLR
 import torchvision
 import torch.utils.data
 import torchvision.transforms as transforms
@@ -31,6 +31,7 @@ from data_utils.transforms import IMAGENET_NORMALIZE_NP, pil_to_np_array
 from lib import train, validate, validate_gt_linear, extract_features
 import unsupervised.faissext
 from utils import save_checkpoint, AverageMeter, accuracy
+from utils import CyclicLr
 
 if not sys.warnoptions:
     # suppress pesky PIL EXIF warnings
@@ -74,6 +75,13 @@ parser.add_argument('--decay_step', type=float, default=26, metavar='EPOCHS',
                     help='learning rate decay step')
 parser.add_argument('--decay_gamma', type=float, default=0.1,
                     help='learning rate decay coeeficient')
+parser.add_argument('--scheduler', choices=['multi_step', 'cyclic'], default='multi_step',
+                    help='learning rate scheduler')
+parser.add_argument('--cycle', type=int, default=20,
+                    help='num epochs in cycle (for --scheduler="cyclic")')
+parser.add_argument('--reset_lr', action='store_true',
+                    help='reset lr to the initial value? (Reset cycle)')
+
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=0.0005, type=float,
@@ -447,8 +455,21 @@ def main():
                                         num_workers=num_workers, use_fast_dataflow=args.fast_dataflow)
     ###############################################################################
 
+
     # StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
-    scheduler = MultiStepLR(optimizer, milestones=[30, 60, 80], gamma=args.decay_gamma)
+    if args.scheduler == 'multi_step':
+        scheduler = MultiStepLR(optimizer, milestones=[30, 60, 80], gamma=args.decay_gamma)
+    elif args.scheduler == 'cyclic':
+        print 'Using Cyclic LR!'
+        cyclic_lr = CyclicLr(start_epoch if args.reset_lr else 0, init_lr=args.lr, num_epochs_per_cycle=args.cycle,
+                             epochs_pro_decay=args.decay_step,
+                             lr_decay_factor=args.decay_gamma
+                             )
+        scheduler = LambdaLR(optimizer, lr_lambda=cyclic_lr)
+        scheduler.base_lrs = list(map(lambda group: 1.0, optimizer.param_groups))
+    else:
+        assert False, 'wrong scheduler: ' + args.scheduler
+
     print 'scheduler.base_lrs=', scheduler.base_lrs
     logger.add_scalar('data/batch_size', args.batch_size, start_epoch)
 
