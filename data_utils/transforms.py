@@ -63,6 +63,7 @@ def pil_to_np_array(pic):
     """Convert a ``PIL Image`` to ``numpy.ndarray``.
        1. If image is 1-channel -> replicate to make 3 channels.
        2. Swap dimensions HWC -> CHW,
+       3. BGR -> RGB
        3. Normalize array to range [0., 1.] if possible (i.e when image is of np.uint8 or np.bool type).
     Args:
         pic (PIL Image): Image to be converted to tensor.
@@ -99,9 +100,9 @@ def pil_to_np_array(pic):
     if len(img.shape) == 2:
         img = np.repeat(img[..., np.newaxis], 3, axis=2)
 
-    # put it from HWC to CHW format
+    # put it from HWC to CHW format and BGR -> RGB
     # yikes, this transpose takes 80% of the loading time/CPU
-    img = img.transpose((2, 0, 1))
+    img = img.transpose((2, 0, 1))[::-1, ...]
     # img = img.transpose(0, 1).transpose(0, 2).contiguous()
     if img.dtype == np.uint8:
         img = np.ascontiguousarray(img, dtype=np.float32) / 255.0

@@ -160,7 +160,6 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
     # and only parallelize the transformations with another
     ds = PrefetchData(ds, nr_prefetch=5000, nr_proc=1)
     ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), index=0)
-
     transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.RandomResizedCrop(224),
@@ -168,7 +167,6 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False):
         pil_to_np_array,
         IMAGENET_NORMALIZE_NP
     ])
-
     ds = AugmentImageComponent(ds, TorchAugmentorList(transform), index=0, copy=False)
     ds = PrefetchDataZMQ(ds, nr_proc=nr_proc)
     ds = TorchBatchData(ds, batch_size=batch_size, remainder=False)
@@ -190,8 +188,8 @@ if __name__ == '__main__':
     ds = create_fast_lmdb_flow(lmdb_path, nr_proc=args.njobs, batch_size=256, shuffle=args.shuffle)
     print 'len(ds):', len(ds)
 
-    for dp in tqdm(ds):
-        print dp[0].__class__, dp[1].__class__
+    # for dp in tqdm(ds):
+    #     print dp[0].__class__, dp[1].__class__
 
     for i in xrange(2):
         TestDataSpeed(ds, size=100, warmup=10).start()
