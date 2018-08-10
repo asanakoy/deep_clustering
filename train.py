@@ -270,7 +270,7 @@ def unsupervised_clustering_step(cur_epoch, model, is_sobel, sobel_normalized, s
             labels_holder['labels_gt'] = np.array(zip(*dataset_indices['train']['samples'])[1])
         else:
             # load labels of teh items stored in the LMDB (in teh same order as in the database)
-            labels_holder['labels_gt'] = np.load(join(split_dirs['train'].strip('/') + '_lmdb_index.npy'))[:, 1]
+            labels_holder['labels_gt'] = np.load(join(split_dirs['train'].rstrip('/') + '_lmdb_index.npy'))[:, 1]
 
     nmi_gt = normalized_mutual_info_score(labels_holder['labels_gt'], labels)
     print 'NMI t / GT = {:.4f}'.format(nmi_gt)
