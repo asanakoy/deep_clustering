@@ -177,7 +177,7 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False, 
 # DataLoader.len() = number of batches
 
 if __name__ == '__main__':
-    split ='val'
+    split ='train'
     lmdb_path = '/export/home/asanakoy/workspace/datasets/ILSVRC2012/{}.lmdb'.format(split)
 
     import argparse
@@ -190,16 +190,19 @@ if __name__ == '__main__':
 
     indices = []
     indices_set = set()
-    for img, label, idx in tqdm(ds):
-        indices.append(idx)
-        if idx is indices_set:
-            print 'Warning idx={} is already in the set'.format(idx)
-        else:
-            indices_set.add(idx)
+    for img, label, idxb in tqdm(ds):
+        indices.append(idxb.tolist())
+        for idx in idxb:
+            if idx in indices_set:
+                print 'Warning idx={} is already in the set'.format(idx)
+                import IPython as IP
+                IP.embed()  # noqa
+            else:
+                indices_set.add(idx)
 
     print len(indices), len(indices_set)
 
-    import ipython
-    ipython.embed()
+    import IPython as IP
+    IP.embed()  # noqa
     # for i in xrange(2):
     #     TestDataSpeed(ds, size=100, warmup=10).start()
