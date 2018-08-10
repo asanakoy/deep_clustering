@@ -247,7 +247,7 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
             nr_prefetch = buffer_size
         ds = PrefetchData(ds, nr_prefetch=nr_prefetch, nr_proc=1)  # will ensure that LMDB Flow is not forked.
         # This will decode images with BGR channel order
-        ds = MapDataComponent(ds, lambda x: np.ascontiguousarray(cv2.imdecode(x, cv2.IMREAD_COLOR)), index=0)
+        ds = MapDataComponent(ds, lambda x: cv2.imdecode(x, cv2.IMREAD_COLOR), index=0)
 
         assert isinstance(transf[-1], transforms.ToTensor)
         transform_list = [transforms.ToPILImage()] + transf[:-1] + [pil_to_np_array]
