@@ -218,6 +218,19 @@ def extract_features(data_loader, net, layer_name):
             start_time = time.time()
     assert cur_pos == len(features)
     assert cur_pos == len(indices)
+
+    u, positions = np.unique(indices, return_index=True)
+    missing_indices = list(set(range(len(features))) - set(u))
+    if len(missing_indices) < 256:
+        print ('WARNING!!! {} points are duplicates. '
+               'Features of missing examples will be randomly '
+               'assigned to the features of duplicates (not elegant, I know)!')
+        # Hopefully this is not happening too often
+        positions_of_duplicates = list(set(range(len(features))) - set(positions))
+        assert len(missing_indices) == len(positions_of_duplicates)
+        # replace repititions with fake assignments
+        indices[positions_of_duplicates] = missing_indices
+
     assert len(indices) == len(np.unique(indices)), len(np.unique(indices))
     permutation = np.arange(len(indices))[np.argsort(indices)]
 
