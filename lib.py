@@ -224,7 +224,7 @@ def extract_features(data_loader, net, layer_name):
     if len(missing_indices) < 256:
         print ('WARNING!!! {} points are duplicates. '
                'Features of missing examples will be randomly '
-               'assigned to the features of duplicates (not elegant, I know)!')
+               'assigned to the features of duplicates (not an elegant crutch, I know)!')
         # Hopefully this is not happening too often
         positions_of_duplicates = list(set(range(len(features))) - set(positions))
         assert len(missing_indices) == len(positions_of_duplicates)
