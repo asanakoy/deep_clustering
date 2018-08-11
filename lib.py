@@ -224,14 +224,15 @@ def extract_features(data_loader, net, layer_name):
     if len(missing_indices) < 256:
         print ('WARNING!!! {} points are duplicates. '
                'Features of missing examples will be randomly '
-               'assigned to the features of duplicates (not an elegant crutch, I know)!')
+               'assigned to the features of duplicates (not an elegant crutch, I know)!'.format(len(missing_indices)))
         # Hopefully this is not happening too often
         positions_of_duplicates = list(set(range(len(features))) - set(positions))
         assert len(missing_indices) == len(positions_of_duplicates)
-        # replace repititions with fake assignments
+        # replace repetitions with fake assignments
         indices[positions_of_duplicates] = missing_indices
 
-    assert len(indices) == len(np.unique(indices)), len(np.unique(indices))
+    assert len(indices) == len(np.unique(indices)), \
+        'Try running without -fdf option! Number of duplicates: {}'.format(len(missing_indices))
     permutation = np.arange(len(indices))[np.argsort(indices)]
 
     with timed_operation('Permute features in the appropriate order...', log_start=True, tformat='m'):
