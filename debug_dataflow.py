@@ -10,6 +10,7 @@ import torch
 from torchvision import transforms
 from tqdm import tqdm
 import cv2
+import time
 
 from data_utils.transforms import pil_to_np_array, IMAGENET_NORMALIZE_NP
 from data_utils.fast_dataflow import TorchBatchData, TorchAugmentorList
@@ -45,11 +46,15 @@ def create_fast_lmdb_flow(lmdb_path, nr_proc=10, batch_size=256, shuffle=False, 
     # We use PrefetchData to launch the base LMDB Flow in only one process,
     # and only parallelize the transformations with another
     ds = PrefetchData(ds, nr_prefetch=5000, nr_proc=1)
-    ds = MapDataComponent(ds, lambda x: x, index=0)
-    transform = transforms.Compose([
-        lambda x: x
-    ])
-    ds = AugmentImageComponent(ds, TorchAugmentorList(transform), index=0, copy=False)
+
+    def f(x):
+        time.sleep(0.005)
+        return x
+    ds = MapDataComponent(ds, f, index=0)
+    # transform = transforms.Compose([
+    #     lambda x: x
+    # ])
+    # ds = AugmentImageComponent(ds, TorchAugmentorList(transform), index=0, copy=False)
     ds = PrefetchDataZMQ(ds, nr_proc=nr_proc)
     ds = TorchBatchData(ds, batch_size=batch_size, remainder=True)
     return ds
@@ -68,8 +73,12 @@ if __name__ == '__main__':
     indices = []
     indices_set = set()
     for img_id, idxb in tqdm(ds):
+        img_id = img_id.tolist()
+        idxb = idxb.tolist()
+        # print img_id.__class__
+        # print idxb.__class__
         assert img_id == idxb, '{} != {}'.format(img_id, idxb)
-        indices.append(idxb.tolist())
+        indices.extend(idxb)
         for idx in idxb:
             if idx in indices_set:
                 print 'Warning idx={} is already in the set'.format(idx)
@@ -78,9 +87,14 @@ if __name__ == '__main__':
             else:
                 indices_set.add(idx)
 
+    # ds = LMDBData(lmdb_path, shuffle=False)
+
+    # for i, row in tqdm(enumerate(ds.get_data())):
+    #     if i >= len(ds):
+    #         print i, 'SECOND ROUND!'
+
     print len(indices), len(indices_set)
 
-    import IPython as IP
-    IP.embed()  # noqa
+    print 'IT"S OK!'
     # for i in xrange(2):
     #     TestDataSpeed(ds, size=100, warmup=10).start()
