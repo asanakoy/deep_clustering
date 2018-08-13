@@ -221,7 +221,7 @@ def extract_features(data_loader, net, layer_name):
 
     u, positions = np.unique(indices, return_index=True)
     missing_indices = list(set(range(len(features))) - set(u))
-    if len(missing_indices) < 256:
+    if len(missing_indices) > 0 and len(missing_indices) < 256:
         print ('WARNING!!! {} points are duplicates. '
                'Features of missing examples will be randomly '
                'assigned to the features of duplicates (not an elegant crutch, I know)!'.format(len(missing_indices)))
