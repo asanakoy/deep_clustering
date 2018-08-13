@@ -78,7 +78,7 @@ parser.add_argument('--decay_step', type=float, default=26, metavar='EPOCHS',
                     help='learning rate decay step')
 parser.add_argument('--decay_gamma', type=float, default=0.1,
                     help='learning rate decay coeeficient')
-parser.add_argument('--scheduler', choices=['multi_step', 'multi_step2', 'cyclic'], default='multi_step',
+parser.add_argument('--scheduler', choices=['step', 'multi_step', 'multi_step2', 'cyclic'], default='multi_step',
                     help='learning rate scheduler')
 parser.add_argument('--cycle', type=int, default=20,
                     help='num epochs in cycle (for --scheduler="cyclic")')
@@ -390,6 +390,7 @@ def main():
                 # raise IOError("=> no checkpoint found at '{}'".format(ckpt_path))
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+    print 'Output dir:', args.output_dir
 
     start_epoch = 0
     best_score = 0
@@ -487,6 +488,8 @@ def main():
                              )
         scheduler = LambdaLR(optimizer, lr_lambda=cyclic_lr)
         scheduler.base_lrs = list(map(lambda group: 1.0, optimizer.param_groups))
+    elif args.scheduler == 'step':
+        scheduler = StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
     else:
         assert False, 'wrong scheduler: ' + args.scheduler
 
