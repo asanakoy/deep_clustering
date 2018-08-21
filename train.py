@@ -31,7 +31,7 @@ from data_utils.transforms import IMAGENET_NORMALIZE_NP, pil_to_np_array
 from lib import train, validate, validate_gt_linear, extract_features
 import unsupervised.faissext
 from utils import save_checkpoint, AverageMeter, accuracy
-from utils import CyclicLr
+from utils import CyclicLr, StepMinLr
 
 if not sys.warnoptions:
     # suppress pesky PIL EXIF warnings
@@ -74,6 +74,8 @@ parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
+parser.add_argument('--min_lr', '--min_learning_rate', default=None, type=float,
+                    metavar='MIN_LR', help='minimal learning rate')
 parser.add_argument('--decay_step', type=float, default=26, metavar='EPOCHS',
                     help='learning rate decay step')
 parser.add_argument('--decay_gamma', type=float, default=0.1,
@@ -160,21 +162,21 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
                        num_workers=2, return_index=False, use_fast_dataflow=False, overwrite_labels=None,
                        buffer_size=5000):
     """
-    
+
     Args:
-        split_dir: 
+        split_dir:
         dataset_index: used only if use_fast_dataflow=True
-        is_sobel: 
-        sobel_normalized: 
-        aug: 
-        batch_size: 
+        is_sobel:
+        sobel_normalized:
+        aug:
+        batch_size:
         shuffle: one of:
             - None: no shuffle
             - 'shuffle': normal shuffle
             - 'shuffle_buffer': shuffle only locally using a buffer. Cannot be used if use_fast_dataflow=False
-        num_workers: 
-        return_index: 
-        use_fast_dataflow: use fast dataFlow based on Tensorpack? 
+        num_workers:
+        return_index:
+        use_fast_dataflow: use fast dataFlow based on Tensorpack?
                 If num_workers > 1 can produce duplicates of the datapoints.
         overwrite_labels (np.array): list of labels which will be used instead of stored in lmdb.
             Has no effect if use_fast_dataflow=False.
@@ -489,7 +491,14 @@ def main():
         scheduler = LambdaLR(optimizer, lr_lambda=cyclic_lr)
         scheduler.base_lrs = list(map(lambda group: 1.0, optimizer.param_groups))
     elif args.scheduler == 'step':
-        scheduler = StepLR(optimizer, step_size=args.decay_step, gamma=args.decay_gamma)
+        step_lr = StepMinLr(start_epoch if args.reset_lr else 0, init_lr=args.lr,
+                             epochs_pro_decay=args.decay_step,
+                             lr_decay_factor=args.decay_gamma,
+                             min_lr=args.min_lr
+                             )
+
+        scheduler = LambdaLR(optimizer, lr_lambda=step_lr)
+        scheduler.base_lrs = list(map(lambda group: 1.0, optimizer.param_groups))
     else:
         assert False, 'wrong scheduler: ' + args.scheduler
 

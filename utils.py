@@ -63,6 +63,23 @@ class CyclicLr(object):
         return lr
 
 
+class StepMinLr(object):
+    def __init__(self, start_epoch, init_lr=1e-2, epochs_pro_decay=2,
+                 lr_decay_factor=0.5, min_lr=None):
+        self.start_epoch = start_epoch
+        self.init_lr = init_lr
+        self.lr_decay_factor = lr_decay_factor
+        self.epochs_pro_decay = epochs_pro_decay
+        self.min_lr = min_lr
+
+    def __call__(self, epoch):
+        cur_epoch = epoch - self.start_epoch
+        lr = self.init_lr * (self.lr_decay_factor ** int(cur_epoch / self.epochs_pro_decay))
+        if self.min_lr is not None:
+            lr = max(lr, self.min_lr)
+        return lr
+
+
 @contextmanager
 def timed_operation(msg, log_start=False, tformat='s'):
     """
