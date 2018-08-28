@@ -235,6 +235,8 @@ def create_data_loader(split_dir, dataset_index, is_sobel, sobel_normalized=Fals
             num_workers=num_workers, pin_memory=True,
             collate_fn=collate_fn)
     else:
+        # FIXME: not sure, but sometimes training without -fdf and then enabling it results in drop in accuracy.
+        # Maybe data preprocessing is not entirely equivalent for these 2 data-loading techniques. Should be further debugged.
         if aug == '10_crop':
             raise NotImplementedError('FastDataFlow for aug=10_crop is not implemented yet!')
         import cv2
