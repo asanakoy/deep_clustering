@@ -1,0 +1,102 @@
+CUDA_VISIBLE_DEVICES=1 python train.py --workers=10 --lr=0.01 --arch=AlexNetSobel -v=2 --sobel_normalized
+
+CUDA_VISIBLE_DEVICES=4 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 -v=2 --sobel_normalized --reset_fc
+
+CUDA_VISIBLE_DEVICES=4 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 -v=2 --sobel_normalized -l=fc6
+
+CUDA_VISIBLE_DEVICES=5 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=1000 -v=2 --sobel_normalized
+
+CUDA_VISIBLE_DEVICES=5 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=1000 -v=2 --sobel_normalized --lr=0.0011
+
+
+-- hcigpu01
+CUDA_VISIBLE_DEVICES=1 python train.py --workers=16 --lr=0.1 -fdf
+CUDA_VISIBLE_DEVICES=3 python train.py --lr=0.01 --workers=8 -fdf
+
+-- hcigpi02
+CUDA_VISIBLE_DEVICES=2 python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --sobel_normalized -dp7=0 -fdf
+
+-- compvisgpu03 
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=20 -nc=10000 --lr=0.001 -scheduler=cyclic --decay_step=25 --reset_lr --decay_gamma=0.3 --cycle=105 -o results/AlexNetSobel_lr0.01_unsup_nc10000_lfc7_rec1_
+
+-- compvisgpu04
+
+CUDA_VISIBLE_DEVICES=3 python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --sobel_normalized --reset_fc -dp7=0
+
+CUDA_VISIBLE_DEVICES=1 python train.py --workers=6 --lr=0.01 --arch=AlexNetSobel -v=1 -o results/AlexNetSobel_lr0.01_labels_v1_ -fdf -dp7=0.3
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=10 -nc=10000 -v=1 --sobel_normalized -l=fc6 -fdf
+
+ -
+
+
+-- hgsgpu01
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 -v=1 --sobel_normalized +
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 -v=1 --sobel_normalized --reset_fc +
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=1000 -v=1 --sobel_normalized +
+python train.py --arch=AlexNetSobel --unsupervised --workers=10 -nc=10000 -v=1 --sobel_normalized --lr=0.1 --reset_fc -o results/AlexNetSobel_lr0.1_unsup_v1_normed_nc10000_lfc7_rec1_reset-fc_ -fdf 
+
+-- hgsgpu02
+
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --sobel_normalized -l=fc6 --reset_fc -fdf 
+
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --scheduler=multi_step2 --sobel_normalized -fdf -suf=clean
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --scheduler=multi_step2 -fdf -suf=clean
+python train.py --workers=8 --lr=0.1 --arch=AlexNetSobel -v=2 --sobel_normalized --decay_step=20 -suf="decstep20" +
+
+
+--stopped (HCI)
+python train.py --workers=8 --lr=0.01 --arch=AlexNetSobel -v=1 --sobel_normalized -fdf --scheduler=cyclic --decay_step=1 --reset_lr --decay_gamma=0.6 --cycle=12
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 -v2
+CUDA_VISIBLE_DEVICES=3 python train.py --workers=12 --lr=0.1 --arch=AlexNetSobel -fdf -o ~/workspace/deep_clustering/results/AlexNetSobel_lr0.01_labels_ 
+python train.py --arch=AlexNetSobel --unsupervised --workers=10 -nc=10000 -v=2 --lr=0.001 +
+
+--killed
+
+
+GOOOD
+--------
+-- hgsgpu01
+
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 --lr=0.01 --scheduler=step --decay_step=100 --decay_gamma=0.1 -fdf --buffer_size=1500 -suf="good"
+
+CUDA_VISIBLE_DEVICES=4 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 --lr=0.1 --scheduler=step --decay_step=100 --decay_gamma=0.1 -fdf --buffer_size=1500 -suf="good"
+
+-- hgsgpu02
+
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --scheduler=multi_step2 --sobel_normalized -fdf -suf=clean
+python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --scheduler=multi_step2 -fdf -suf=clean
+
+
+-- compvisgpu03
+
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --lr=0.0003 --scheduler=cyclic --decay_step=30 --reset_lr --decay_gamma=0.3 --cycle=63 -o results/AlexNetSobel_lr0.01_unsup_nc10000_lfc7_rec1_
+
+CUDA_VISIBLE_DEVICES=1 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 --lr=0.1 --scheduler=step --decay_step=100 --decay_gamma=0.1 -fdf --buffer_size=1500 -suf="good" --reset_fc (stopped)
+
+-- compvisgpu04
+
+CUDA_VISIBLE_DEVICES=3 python train.py --arch=AlexNetSobel --unsupervised --workers=12 -nc=10000 --sobel_normalized --reset_fc -dp7=0
+
+
+-- hcigpu01
+
+python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000  --sobel_normalized --reset_fc --scheduler=step --lr=0.01 --min_lr=0.001 --reset_lr --decay_step=20 --decay_gamma=0.1 --from_best  (TO BE RUN)
+
+
+-- hcigpu02
+
+CUDA_VISIBLE_DEVICES=2 python train.py --arch=AlexNetSobel --unsupervised --workers=8 -nc=10000 --lr=0.1 --scheduler=step --decay_step=100 --decay_gamma=0.1 -fdf --buffer_size=1500 -suf="good2" --reset_fc
+
+
+-- compgpu2
+CUDA_VISIBLE_DEVICES=1 python train.py --arch=AlexNetSobel --unsupervised --workers=10 -nc=10000 --sobel_normalized --reset_fc -dp7=0 --buffer_size=1900 -o results/AlexNetSobel_lr0.01_unsup_normed_nc10000_lfc7_rec1_reset-fc_2
+
+
+
+
+
+------
+NOTES:
+
+If reset fc every epoch, then do not go lower than lr=0.001 (10**-3)
+
