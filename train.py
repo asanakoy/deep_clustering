@@ -70,6 +70,8 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=500, type=int, metavar='N',
                     help='number of total epochs to run')
+parser.add_argument('--epochs_train_linear', default=2, type=int, metavar='N',
+                    help='number of total epochs to train alinear classifier for validation')
 parser.add_argument('-b', '--batch-size', default=256, type=int,
                     metavar='N', help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
@@ -562,7 +564,7 @@ def main():
             else:
                 score = validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes,
                                            model, args.eval_layer, criterion, epoch,
-                                           lr=0.01, num_train_epochs=2,
+                                           lr=0.01, num_train_epochs=args.epochs_train_linear,
                                            logger=logger, tag='val_gt_{}_{}'.format(args.eval_layer, eval_gt_aug))
 
             # remember best prec@1 and save checkpoint
