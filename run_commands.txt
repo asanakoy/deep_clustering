@@ -92,7 +92,8 @@ CUDA_VISIBLE_DEVICES=2 python train.py --arch=AlexNetSobel --unsupervised --work
 CUDA_VISIBLE_DEVICES=1 python train.py --arch=AlexNetSobel --unsupervised --workers=10 -nc=10000 --sobel_normalized --reset_fc -dp7=0 --buffer_size=1900 -o results/AlexNetSobel_lr0.01_unsup_normed_nc10000_lfc7_rec1_reset-fc_2
 
 
-
+compgpu3
+CUDA_VISIBLE_DEVICES=0 python train.py --arch=AlexNetSobel --unsupervised --workers=20 -nc=1000 --lr=0.01 --scheduler=step --decay_step=100 --decay_gamma=0.1 --buffer_size=1500 --epochs_train_linear=6 -suf="good3" -o results/AlexNetSobel_lr0.01_unsup_nc10000_lfc7_rec1
 
 
 ------
