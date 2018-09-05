@@ -81,7 +81,7 @@ def train(train_loader, model, criterion, optimizer,
     return top1.avg, top5.avg, losses.avg
 
 
-def validate(val_loader, model, criterion, epoch, logger, tag='val'):
+def validate(val_loader, model, criterion, epoch, epoch_to_save_log, logger, tag='val'):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -125,16 +125,16 @@ def validate(val_loader, model, criterion, epoch, logger, tag='val'):
                     img_sec=len(images) / batch_time.val,
                     img_sec_avg=len(images) / batch_time.avg))
 
-    logger.add_scalar('({})avg_loss'.format(tag), losses.avg, epoch + 1)
-    logger.add_scalar('({})avg_top1'.format(tag), top1.avg, epoch + 1)
-    logger.add_scalar('({})avg_top5'.format(tag), top5.avg, epoch + 1)
+    logger.add_scalar('({})avg_loss'.format(tag), losses.avg, epoch_to_save_log + 1)
+    logger.add_scalar('({})avg_top1'.format(tag), top1.avg, epoch_to_save_log + 1)
+    logger.add_scalar('({})avg_top5'.format(tag), top5.avg, epoch_to_save_log + 1)
     print('[{tag}] epoch {epoch}: Loss: {loss.avg:.3f} '
           'Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
           .format(tag=tag.upper(), epoch=epoch + 1, loss=losses, top1=top1, top5=top5))
     return top1.avg
 
 
-def validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes, net, layer_name, criterion, epoch, lr=0.01, num_train_epochs=2, logger=None, tag='VAL_GT'):
+def validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes, net, layer_name, criterion, cur_epoch, lr=0.01, num_train_epochs=2, logger=None, tag='VAL_GT'):
     """
     Train a linear classifier on top of conv4 features and evaluate using GT labels.
     """
@@ -160,7 +160,7 @@ def validate_gt_linear(train_loader_gt, val_loader_gt, num_gt_classes, net, laye
         assert np.allclose(weight_sobel, weight_sobel_after), 'Sobel weights changed!'
         assert np.allclose(weight_conv1, weight_conv1_after), 'conv1 weights changed!'
 
-        acc = validate(val_loader_gt, net, criterion, epoch, logger, tag='val_gt_linear')
+        acc = validate(val_loader_gt, net, criterion, epoch, epoch_to_save_log=cur_epoch + epoch, logger=logger, tag='val_gt_linear')
         print '[{}] Prec@1 {}'.format(tag.upper(), acc)
     return acc
 
